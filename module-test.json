@@ -1,7 +1,0 @@
-{
-  "name": "ds-socket",
-  "title": "DS Socket Test",
-  "description": "Test module",
-  "version": "1.0.0",
-  "minimumCoreVersion": "11"
-}
