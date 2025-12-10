@@ -37,6 +37,21 @@ jobs:
           sed -i 's|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/latest/download/module.json"|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/module.json"|' ds-quick-strike/module.json
           sed -i 's|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/[^/]\+/ds-quick-strike-[^.]*\.zip"|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/ds-quick-strike-${{ env.VERSION }}.zip"|' ds-quick-strike/module.json
 
+      - name: Verify assets exist
+        run: |
+          echo "Checking for required assets:"
+          ls -la ds-quick-strike/module.json
+          ls -la ds-quick-strike-${{ env.VERSION }}.zip
+          if [ ! -f "ds-quick-strike/module.json" ]; then
+            echo "ERROR: module.json not found!"
+            exit 1
+          fi
+          if [ ! -f "ds-quick-strike-${{ env.VERSION }}.zip" ]; then
+            echo "ERROR: Zip file not found!"
+            exit 1
+          fi
+          echo "All assets verified successfully"
+
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
