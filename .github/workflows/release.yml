@@ -37,9 +37,8 @@ jobs:
           sed -i 's|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/latest/download/module.json"|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/module.json"|' ds-quick-strike/module.json
           sed -i 's|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/[^/]\+/ds-quick-strike-[^.]*\.zip"|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/ds-quick-strike-${{ env.VERSION }}.zip"|' ds-quick-strike/module.json
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
           name: Draw Steel Quick Strike v${{ env.VERSION }}
@@ -68,22 +67,9 @@ jobs:
             Or search for "Draw Steel Quick Strike" in the Foundry Module Browser.
           draft: false
           prerelease: false
-
-      - name: Upload Release Asset (module.json)
-        uses: actions/upload-release-asset@v4
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ds-quick-strike/module.json
-          asset_name: module.json
-          asset_content_type: application/json
-
-      - name: Upload Release Asset (zip)
-        uses: actions/upload-release-asset@v4
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ds-quick-strike-${{ env.VERSION }}.zip
-          asset_name: ds-quick-strike-${{ env.VERSION }}.zip
-          asset_content_type: application/zip
+          files: |
+            ds-quick-strike/module.json
+            ds-quick-strike-${{ env.VERSION }}.zip
 
       - name: Clean up
         run: |
