@@ -90,7 +90,8 @@ function wrapActorTakeDamage(actor) {
         targetActorId: actor.id,
         originalStamina: preStamina,
         newStamina: postStamina,
-        appliedByUser: game.user.name,
+        sourceActorName: game.user.character?.name || game.user.name,
+        sourcePlayerName: game.user.name,
         source: 'direct'
       });
     }
@@ -147,13 +148,21 @@ function installDamageOverride() {
         return; // User cancelled self-damage
       }
 
-      const needsRedirect = targets.length > 0 && targets.some(t => !t.isOwner);
+      // Get source actor name from message speaker (who performed the roll)
+      let sourceActorName = 'Unknown Source';
+      if (message.speaker?.actor) {
+        const sourceActor = game.actors.get(message.speaker.actor);
+        if (sourceActor) {
+          sourceActorName = sourceActor.name;
+        }
+      }
 
-      if (needsRedirect && socket) {
-        console.log(`${MODULE_ID}: Redirecting to GM via socket`);
-        await applyDamageViaSocket(targets, roll, amount);
+      // Always use socket handlers for consistent logging (works for both players and GMs)
+      if (socket) {
+        console.log(`${MODULE_ID}: Redirecting to GM via socket (source: ${sourceActorName})`);
+        await applyDamageViaSocket(targets, roll, amount, sourceActorName);
       } else {
-        console.log(`${MODULE_ID}: Using original damage application`);
+        console.log(`${MODULE_ID}: No socket available, using original damage application`);
         await originalCallback.call(this, event);
       }
     } catch (error) {
@@ -221,7 +230,7 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
 /**
  * Send damage request to GM via socket
  */
-async function applyDamageViaSocket(targets, roll, amount) {
+async function applyDamageViaSocket(targets, roll, amount, sourceActorName) {
   try {
     for (const target of targets) {
       console.log(`${MODULE_ID}: Sending damage request for ${target.name}`);
@@ -231,7 +240,8 @@ async function applyDamageViaSocket(targets, roll, amount) {
           tokenId: target.id,
           amount: amount,
           type: roll.type,
-          playerName: game.user.name
+          sourceActorName: sourceActorName,
+          sourcePlayerName: game.user.name
         });
 
         if (result.success) {
@@ -245,7 +255,8 @@ async function applyDamageViaSocket(targets, roll, amount) {
           amount: amount,
           type: roll.type,
           ignoredImmunities: roll.ignoredImmunities || [],
-          playerName: game.user.name
+          sourceActorName: sourceActorName,
+          sourcePlayerName: game.user.name
         });
 
         if (result.success) {
@@ -312,7 +323,7 @@ function applyStaminaBounds(actor, staminaSnapshot) {
  * GM handler: Apply damage to a target (via socket from player)
  * Captures stamina snapshots before and after damage
  */
-async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, playerName }) {
+async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, sourceActorName, sourcePlayerName }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -333,7 +344,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
 
     // Capture stamina BEFORE damage
     const originalStamina = getStaminaSnapshot(actor);
-    console.log(`${MODULE_ID}: GM applying ${amount} damage to ${actor.name} (requested by ${playerName}). Pre-damage stamina: Perm=${originalStamina.permanent}, Temp=${originalStamina.temporary}. Is Hero: ${isHero(actor)}`);
+    console.log(`${MODULE_ID}: GM applying ${amount} damage to ${actor.name} (source: ${sourceActorName}, player: ${sourcePlayerName}). Pre-damage stamina: Perm=${originalStamina.permanent}, Temp=${originalStamina.temporary}. Is Hero: ${isHero(actor)}`);
 
     // Apply damage
     await actor.system.takeDamage(amount, {
@@ -367,7 +378,8 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
         targetActorId: actor.id,
         originalStamina: originalStamina,
         newStamina: newStamina,
-        appliedByUser: playerName,
+        sourceActorName: sourceActorName,
+        sourcePlayerName: sourcePlayerName,
         source: 'socket'
       });
       console.log(`${MODULE_ID}: Successfully logged damage to chat`);
@@ -390,7 +402,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
  * GM handler: Apply healing to a target (via socket from player)
  * Captures stamina snapshots before and after healing
  */
-async function handleGMHealApplication({ tokenId, amount, type, playerName }) {
+async function handleGMHealApplication({ tokenId, amount, type, sourceActorName, sourcePlayerName }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -409,7 +421,7 @@ async function handleGMHealApplication({ tokenId, amount, type, playerName }) {
 
     // Capture stamina BEFORE healing
     const originalStamina = getStaminaSnapshot(actor);
-    console.log(`${MODULE_ID}: GM applying ${amount} healing to ${actor.name} (requested by ${playerName}). Pre-heal stamina: Perm=${originalStamina.permanent}, Temp=${originalStamina.temporary}`);
+    console.log(`${MODULE_ID}: GM applying ${amount} healing to ${actor.name} (source: ${sourceActorName}, player: ${sourcePlayerName}). Pre-heal stamina: Perm=${originalStamina.permanent}, Temp=${originalStamina.temporary}`);
 
     const isTemp = type !== "value";
     const currentTemp = actor.system.stamina?.temporary || 0;
@@ -449,7 +461,8 @@ async function handleGMHealApplication({ tokenId, amount, type, playerName }) {
         targetActorId: actor.id,
         originalStamina: originalStamina,
         newStamina: newStamina,
-        appliedByUser: playerName,
+        sourceActorName: sourceActorName,
+        sourcePlayerName: sourcePlayerName,
         source: 'socket'
       });
     } catch (logError) {
@@ -477,7 +490,7 @@ async function logDamageToChat(entry) {
     console.log(`${MODULE_ID}: logDamageToChat called with:`, entry);
     
     const icon = entry.type === 'damage' ? '⚔️' : '✨';
-    const sourceLabel = entry.source === 'socket' ? '(via player request)' : '(direct GM action)';
+    const sourceLabel = entry.source === 'socket' ? `(via ${entry.sourcePlayerName})` : '(direct GM action)';
     
     // Build stamina display string - only show temp if actor has any
     let staminaDisplay = `${entry.originalStamina.permanent} → ${entry.newStamina.permanent}`;
@@ -492,7 +505,7 @@ async function logDamageToChat(entry) {
           <span style="font-size: 0.8em; color: #aaa;">${sourceLabel}</span>
         </div>
         <div style="margin-bottom: 4px;">
-          <strong>${entry.targetName}</strong> hit by <strong>${entry.appliedByUser}</strong>
+          <strong>${entry.targetName}</strong> hit by <strong>${entry.sourceActorName}</strong>
         </div>
         <div style="margin-bottom: 4px;">
           ${entry.amount} ${entry.damageType} 
@@ -545,7 +558,7 @@ async function logDamageToChat(entry) {
       messageId: message.id
     });
 
-    console.log(`${MODULE_ID}: Logged to chat: ${entry.targetName} ${entry.type} (Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent}) from ${entry.appliedByUser}`);
+    console.log(`${MODULE_ID}: Logged to chat: ${entry.targetName} ${entry.type} (Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent}) from ${entry.sourceActorName}`);
   } catch (error) {
     console.error(`${MODULE_ID}: logDamageToChat ERROR:`, error);
     console.error(`${MODULE_ID}: Stack trace:`, error.stack);
