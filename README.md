@@ -10,3 +10,6 @@ Foundry, by default, prevents players from applying damage tokens they don't own
 - Notifcations (via PM) to GM/Director with undo capibilites for damage
 - Quick reminders to players if they accidently target themselves for damage. 
 
+## Requirements
+
+⚠️ SocketLib is REQUIRED
