@@ -1,7 +1,7 @@
 {
-  "id": "ds-socket",
-  "title": "Draw Steel Damage Fix",
-  "description": "Socket-based damage application with GM relay and smart validation for Draw Steel system",
+  "id": "ds-quick-strike",
+  "title": "Draw Steel Quick Strike",
+  "description": "Damage redirection and logging for Draw Steel system with GM relay",
   "version": "1.3.0",
   "authors": [
     {
@@ -25,6 +25,5 @@
   ],
   "esmodules": [
     "scripts/damage-fix.mjs"
-  ],
-  "socket": true
+  ]
 }

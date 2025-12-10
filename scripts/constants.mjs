@@ -1,1 +1,1 @@
-export const MODULE_ID = 'ds-socket';
+export const MODULE_ID = 'ds-quick-strike';
