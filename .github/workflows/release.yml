@@ -1,0 +1,93 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Create distribution directory
+        run: |
+          mkdir -p ds-quick-strike
+          cp module.json ds-quick-strike/
+          cp -r scripts/ ds-quick-strike/
+
+      - name: Create zip file
+        run: |
+          cd ds-quick-strike
+          zip -r ../ds-quick-strike-${{ env.VERSION }}.zip .
+          cd ..
+
+      - name: Update module.json with version-specific URLs
+        uses: jossef/action-replace@v3
+        with:
+          files: '"ds-quick-strike/module.json"'
+          regex: '"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/[^/]+/ds-quick-strike\.zip"'
+          replacement: '"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/ds-quick-strike-${{ env.VERSION }}.zip"'
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Draw Steel Quick Strike v${{ env.VERSION }}
+          body: |
+            ## Draw Steel Quick Strike v${{ env.VERSION }}
+
+            A Foundry VTT module that enables collaborative damage application in the Draw Steel system through a secure GM relay mechanism.
+
+            ### Features
+            - Players can apply damage to NPC tokens they don't own
+            - GM relay system with SocketLib
+            - Private chat logging with undo functionality
+            - Self-damage warnings
+            - Accurate source attribution
+
+            ### Requirements
+            - SocketLib module
+            - Foundry VTT v11+
+            - Draw Steel system
+
+            ### Installation
+            1. In Foundry, go to **Add-on Modules** → **Install Module**
+            2. Enter this URL: `https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/module.json`
+            3. Click **Install**
+
+            Or search for "Draw Steel Quick Strike" in the Foundry Module Browser.
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset (module.json)
+        uses: actions/upload-release-asset@v3
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ds-quick-strike/module.json
+          asset_name: module.json
+          asset_content_type: application/json
+
+      - name: Upload Release Asset (zip)
+        uses: actions/upload-release-asset@v3
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ds-quick-strike-${{ env.VERSION }}.zip
+          asset_name: ds-quick-strike-${{ env.VERSION }}.zip
+          asset_content_type: application/zip
+
+      - name: Clean up
+        run: |
+          rm -rf ds-quick-strike
+          rm -f ds-quick-strike-${{ env.VERSION }}.zip
