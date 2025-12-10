@@ -8,11 +8,36 @@ const originalTakeDamageMap = new Map();
  * Initialize when SocketLib is ready
  */
 Hooks.once('socketlib.ready', () => {
-  socket = socketlib.registerModule(MODULE_ID);
-  socket.register('applyDamageToTarget', handleGMDamageApplication);
-  socket.register('applyHealToTarget', handleGMHealApplication);
-  socket.register('undoLastDamage', handleGMUndoDamage);
-  console.log(`${MODULE_ID}: SocketLib registered`);
+  console.log(`${MODULE_ID}: socketlib.ready hook fired on ${game.user.isGM ? 'GM' : 'PLAYER'} client`);
+  try {
+    socket = socketlib.registerModule(MODULE_ID);
+    console.log(`${MODULE_ID}: Socket registered successfully on ${game.user.isGM ? 'GM' : 'PLAYER'} client`);
+
+    socket.register('applyDamageToTarget', handleGMDamageApplication);
+    socket.register('applyHealToTarget', handleGMHealApplication);
+    socket.register('undoLastDamage', handleGMUndoDamage);
+    console.log(`${MODULE_ID}: Socket handlers registered on ${game.user.isGM ? 'GM' : 'PLAYER'} client`);
+
+    // Test the socket
+    console.log(`${MODULE_ID}: Socket instance:`, socket);
+    console.log(`${MODULE_ID}: Socket registered as:`, socket._socket?.namespace);
+
+  } catch (error) {
+    console.error(`${MODULE_ID}: Failed to register socket on ${game.user.isGM ? 'GM' : 'PLAYER'} client:`, error);
+  }
+});
+
+// Also check if socketlib is available at all
+Hooks.once('ready', () => {
+  console.log(`${MODULE_ID}: === SOCKET DEBUG CHECK ===`);
+  console.log(`${MODULE_ID}: User is GM: ${game.user.isGM}`);
+  console.log(`${MODULE_ID}: socketlib available:`, typeof socketlib !== 'undefined');
+  console.log(`${MODULE_ID}: socketlib ready state:`, socketlib?.ready);
+  console.log(`${MODULE_ID}: Socket instance exists:`, !!socket);
+  console.log(`${MODULE_ID}: Active GM users:`, game.users.filter(u => u.isGM && u.active).map(u => u.name));
+  console.log(`${MODULE_ID}: Module ID: '${MODULE_ID}'`);
+  console.log(`${MODULE_ID}: Module manifest ID: '${game.modules.get(MODULE_ID)?.id}'`);
+  console.log(`${MODULE_ID}: ===============================`);
 });
 
 /**
@@ -159,10 +184,16 @@ function installDamageOverride() {
 
       // Always use socket handlers for consistent logging (works for both players and GMs)
       if (socket) {
-        console.log(`${MODULE_ID}: Redirecting to GM via socket (source: ${sourceActorName})`);
+        console.log(`${MODULE_ID}: Using socket - GM online: ${game.users.filter(u => u.isGM && u.active).length > 0}`);
         await applyDamageViaSocket(targets, roll, amount, sourceActorName);
       } else {
-        console.log(`${MODULE_ID}: No socket available, using original damage application`);
+        console.error(`${MODULE_ID}: === SOCKET FAILURE DEBUG ===`);
+        console.error(`${MODULE_ID}: No socket available on ${game.user.isGM ? 'GM' : 'PLAYER'} client`);
+        console.error(`${MODULE_ID}: socketlib exists: ${typeof socketlib !== 'undefined'}`);
+        console.error(`${MODULE_ID}: socketlib.ready: ${socketlib?.ready}`);
+        console.error(`${MODULE_ID}: MODULE_ID: '${MODULE_ID}'`);
+        console.error(`${MODULE_ID}: Active GMs: ${game.users.filter(u => u.isGM && u.active).map(u => u.name)}`);
+        console.error(`${MODULE_ID}: ============================`);
         await originalCallback.call(this, event);
       }
     } catch (error) {

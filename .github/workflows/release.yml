@@ -85,7 +85,6 @@ jobs:
             2. Enter this URL: `https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/module.json`
             3. Click **Install**
 
-            Or search for "Draw Steel Quick Strike" in the Foundry Module Browser.
           draft: false
           prerelease: false
           files: |
