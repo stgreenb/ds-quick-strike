@@ -2,7 +2,7 @@
   "id": "ds-socket",
   "title": "Draw Steel Damage Fix",
   "description": "Socket-based damage application with GM relay and smart validation for Draw Steel system",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "authors": [
     {
       "name": "Draw Steel Community",

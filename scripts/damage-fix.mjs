@@ -67,11 +67,11 @@ function wrapActorTakeDamage(actor) {
   originalTakeDamageMap.set(actor.id, originalTakeDamage);
 
   actor.system.takeDamage = async function(amount, options = {}) {
-    const preStamina = getStamina(actor);
+    const preStamina = getStaminaSnapshot(actor);
     
     const result = await originalTakeDamage(amount, options);
     
-    const postStamina = getStamina(actor);
+    const postStamina = getStaminaSnapshot(actor);
     const damageType = options.type || 'untyped';
 
     const caller = new Error().stack;
@@ -141,6 +141,12 @@ function installDamageOverride() {
       const targets = Array.from(game.user.targets);
       console.log(`${MODULE_ID}: User has ${targets.length} targets`, targets.map(t => t.name));
 
+      // Check for self-damage and warn player
+      const proceedWithDamage = await checkForSelfDamage(targets, amount, roll.isHeal, MODULE_ID);
+      if (!proceedWithDamage) {
+        return; // User cancelled self-damage
+      }
+
       const needsRedirect = targets.length > 0 && targets.some(t => !t.isOwner);
 
       if (needsRedirect && socket) {
@@ -157,6 +163,59 @@ function installDamageOverride() {
   };
 
   console.log(`${MODULE_ID}: Override installed successfully`);
+}
+
+/**
+ * Check for self-damage and warn player before applying
+ * Damage to self is allowed but easy to do by accident
+ */
+async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
+  const playerCharacter = game.user.character;
+  if (!playerCharacter) return true; // No player character, continue
+  
+  // Check if any targets are the player's own character
+  const selfDamageTargets = targets.filter(t => t.actor.id === playerCharacter.id);
+  
+  // Only warn on damage, not healing (healing self is totally normal)
+  if (selfDamageTargets.length > 0 && !isHeal) {
+    const targetName = selfDamageTargets[0].name;
+    console.log(`${moduleId}: Self-damage detected - ${targetName}, ${amount} damage`);
+    
+    return new Promise(resolve => {
+      const dialog = new Dialog({
+        title: "⚠️ Self-Damage Warning",
+        content: `<div style="text-align: center; padding: 12px;">
+                    <p style="margin: 0 0 12px 0; font-size: 16px;">
+                      You're about to deal <strong>${amount}</strong> damage to yourself!
+                    </p>
+                    <p style="margin: 0; color: #666; font-size: 14px;">
+                      <strong>${targetName}</strong>
+                    </p>
+                  </div>`,
+        buttons: {
+          confirm: {
+            label: "Confirm",
+            callback: () => {
+              console.log(`${moduleId}: Player confirmed self-damage`);
+              resolve(true);
+            }
+          },
+          cancel: {
+            label: "Cancel",
+            callback: () => {
+              console.log(`${moduleId}: Player cancelled self-damage`);
+              ui.notifications.warn(`Damage to ${targetName} cancelled`);
+              resolve(false);
+            }
+          }
+        },
+        default: "cancel"
+      });
+      dialog.render(true);
+    });
+  }
+  
+  return true; // No self-damage, continue normally
 }
 
 /**
@@ -203,23 +262,14 @@ async function applyDamageViaSocket(targets, roll, amount) {
 }
 
 /**
- * Helper to safely get stamina from actor
- * Draw Steel: stamina is stored as {value, max, temporary, min, bonuses, ...}
+ * Get stamina snapshot - captures both permanent and temporary
+ * Returns {permanent: number, temporary: number}
  */
-function getStamina(actor) {
-  // Detailed logging to diagnose stamina reading
-  console.log(`${MODULE_ID}: [getStamina] Actor: ${actor.name}, ID: ${actor.id}`);
-  console.log(`${MODULE_ID}: [getStamina] Full stamina object:`, actor.system?.stamina);
+function getStaminaSnapshot(actor) {
+  const permanent = actor.system?.stamina?.value ?? 0;
+  const temporary = actor.system?.stamina?.temporary ?? 0;
   
-  if (actor.system?.stamina?.value !== undefined) {
-    const val = actor.system.stamina.value;
-    console.log(`${MODULE_ID}: [getStamina] FOUND value: ${val} (max: ${actor.system.stamina.max})`);
-    return val;
-  }
-  
-  console.warn(`${MODULE_ID}: [getStamina] Could not find stamina.value on actor:`, actor.id, actor.name);
-  console.warn(`${MODULE_ID}: [getStamina] actor.system.stamina structure:`, actor.system?.stamina);
-  return 0;
+  return { permanent, temporary };
 }
 
 /**
@@ -230,7 +280,7 @@ function getStamina(actor) {
 function isHero(actor) {
   const type = actor.type || actor.system?.type;
   console.log(`${MODULE_ID}: ${actor.name} type is '${type}'`);
-  return type === 'character' || type === 'hero'; // Heroes/PCs are 'character' or 'hero' type
+  return type === 'character' || type === 'hero';
 }
 
 /**
@@ -238,22 +288,29 @@ function isHero(actor) {
  * NPCs: clamp to [0, max]
  * Heroes: clamp to [min, max] where min can be negative
  */
-function applyStaminaBounds(actor, stamina) {
+function applyStaminaBounds(actor, staminaSnapshot) {
   const max = actor.system?.stamina?.max || 0;
   const min = actor.system?.stamina?.min || 0;
   
+  let permanent = staminaSnapshot.permanent;
+  
   if (isHero(actor)) {
     // Heroes can go negative
-    return Math.max(min, Math.min(max, stamina));
+    permanent = Math.max(min, Math.min(max, permanent));
   } else {
     // NPCs die at 0 stamina
-    return Math.max(0, Math.min(max, stamina));
+    permanent = Math.max(0, Math.min(max, permanent));
   }
+  
+  return {
+    permanent,
+    temporary: staminaSnapshot.temporary
+  };
 }
 
 /**
  * GM handler: Apply damage to a target (via socket from player)
- * Get fresh actor data from game.actors (not token.actor)
+ * Captures stamina snapshots before and after damage
  */
 async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, playerName }) {
   if (!game.user.isGM) {
@@ -267,16 +324,16 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
       return { success: false, error: "Token not found" };
     }
 
-    // Use token.actor for fresher data (game.actors cache may be stale)
+    // Use token.actor for fresh data
     const actor = token.actor;
     if (!actor) {
       console.warn(`${MODULE_ID}: Actor not found for token: ${tokenId}`);
       return { success: false, error: "Actor not found" };
     }
 
-    // Capture stamina BEFORE damage using helper
-    const originalStamina = getStamina(actor);
-    console.log(`${MODULE_ID}: GM applying ${amount} damage to ${actor.name} (requested by ${playerName}). Pre-damage stamina: ${originalStamina}. Is Hero: ${isHero(actor)}`);
+    // Capture stamina BEFORE damage
+    const originalStamina = getStaminaSnapshot(actor);
+    console.log(`${MODULE_ID}: GM applying ${amount} damage to ${actor.name} (requested by ${playerName}). Pre-damage stamina: Perm=${originalStamina.permanent}, Temp=${originalStamina.temporary}. Is Hero: ${isHero(actor)}`);
 
     // Apply damage
     await actor.system.takeDamage(amount, {
@@ -284,23 +341,22 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
       ignoredImmunities: ignoredImmunities || []
     });
 
-    // Capture stamina AFTER damage - refresh actor data
-    // Note: token.actor should auto-update after takeDamage
-    let newStamina = getStamina(actor);
+    // Capture stamina AFTER damage - use same actor reference (not stale cache)
+    let newStamina = getStaminaSnapshot(actor);
     
     // Apply bounds based on actor type (NPC vs Hero)
     newStamina = applyStaminaBounds(actor, newStamina);
     
     // If bounds changed the stamina, update the actor
-    if (newStamina !== getStamina(actor)) {
-      console.log(`${MODULE_ID}: Applying stamina bounds: ${getStamina(actor)} → ${newStamina}`);
-      await actor.update({'system.stamina.value': newStamina});
+    if (newStamina.permanent !== getStaminaSnapshot(actor).permanent) {
+      console.log(`${MODULE_ID}: Applying stamina bounds: ${getStaminaSnapshot(actor).permanent} → ${newStamina.permanent}`);
+      await actor.update({'system.stamina.value': newStamina.permanent});
     }
     
-    console.log(`${MODULE_ID}: Post-damage stamina: ${newStamina}`);
+    console.log(`${MODULE_ID}: Post-damage stamina: Perm=${newStamina.permanent}, Temp=${newStamina.temporary}`);
 
     // Log to chat explicitly
-    console.log(`${MODULE_ID}: About to log damage to chat: ${actor.name} (${originalStamina}→${newStamina})`);
+    console.log(`${MODULE_ID}: About to log damage to chat: ${actor.name} (Perm: ${originalStamina.permanent}→${newStamina.permanent}, Temp: ${originalStamina.temporary}→${newStamina.temporary})`);
     try {
       await logDamageToChat({
         type: 'damage',
@@ -332,7 +388,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
 
 /**
  * GM handler: Apply healing to a target (via socket from player)
- * Get fresh actor data from game.actors (not token.actor)
+ * Captures stamina snapshots before and after healing
  */
 async function handleGMHealApplication({ tokenId, amount, type, playerName }) {
   if (!game.user.isGM) {
@@ -345,15 +401,15 @@ async function handleGMHealApplication({ tokenId, amount, type, playerName }) {
       return { success: false, error: "Token not found" };
     }
 
-    // Use token.actor for fresher data (game.actors cache may be stale)
+    // Use token.actor for fresh data
     const actor = token.actor;
     if (!actor) {
       return { success: false, error: "Actor not found" };
     }
 
     // Capture stamina BEFORE healing
-    const originalStamina = getStamina(actor);
-    console.log(`${MODULE_ID}: GM applying ${amount} healing to ${actor.name} (requested by ${playerName}). Pre-heal stamina: ${originalStamina}`);
+    const originalStamina = getStaminaSnapshot(actor);
+    console.log(`${MODULE_ID}: GM applying ${amount} healing to ${actor.name} (requested by ${playerName}). Pre-heal stamina: Perm=${originalStamina.permanent}, Temp=${originalStamina.temporary}`);
 
     const isTemp = type !== "value";
     const currentTemp = actor.system.stamina?.temporary || 0;
@@ -369,19 +425,18 @@ async function handleGMHealApplication({ tokenId, amount, type, playerName }) {
       !isTemp
     );
 
-    // Capture stamina AFTER healing - refresh actor data
-    // Note: token.actor should auto-update after modifyTokenAttribute
-    let newStamina = getStamina(actor);
+    // Capture stamina AFTER healing - use same actor reference (not stale cache)
+    let newStamina = getStaminaSnapshot(actor);
     
     // Apply bounds (healing should respect max, but not min for heroes)
     const max = actor.system?.stamina?.max || 0;
-    newStamina = Math.min(newStamina, max);
+    newStamina.permanent = Math.min(newStamina.permanent, max);
     
-    if (newStamina !== getStamina(actor)) {
-      await actor.update({'system.stamina.value': newStamina});
+    if (newStamina.permanent !== getStaminaSnapshot(actor).permanent) {
+      await actor.update({'system.stamina.value': newStamina.permanent});
     }
     
-    console.log(`${MODULE_ID}: Post-heal stamina: ${newStamina}`);
+    console.log(`${MODULE_ID}: Post-heal stamina: Perm=${newStamina.permanent}, Temp=${newStamina.temporary}`);
 
     // Log to chat explicitly
     try {
@@ -414,6 +469,7 @@ async function handleGMHealApplication({ tokenId, amount, type, playerName }) {
 
 /**
  * Log damage/healing to chat as private message to GM
+ * Shows temporary stamina only if the target has any
  * v13+ Foundry API compatible
  */
 async function logDamageToChat(entry) {
@@ -422,6 +478,12 @@ async function logDamageToChat(entry) {
     
     const icon = entry.type === 'damage' ? '⚔️' : '✨';
     const sourceLabel = entry.source === 'socket' ? '(via player request)' : '(direct GM action)';
+    
+    // Build stamina display string - only show temp if actor has any
+    let staminaDisplay = `${entry.originalStamina.permanent} → ${entry.newStamina.permanent}`;
+    if (entry.originalStamina.temporary > 0 || entry.newStamina.temporary > 0) {
+      staminaDisplay = `Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent} | Temp: ${entry.originalStamina.temporary}→${entry.newStamina.temporary}`;
+    }
     
     const content = `
       <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'damage' ? '#e76f51' : '#2a9d8f'};">
@@ -434,13 +496,14 @@ async function logDamageToChat(entry) {
         </div>
         <div style="margin-bottom: 4px;">
           ${entry.amount} ${entry.damageType} 
-          (Stamina: ${entry.originalStamina} → ${entry.newStamina})
+          (Stamina: ${staminaDisplay})
         </div>
         <div style="margin-top: 8px;">
           <button 
             class="damage-undo-btn" 
             data-target-token="${entry.targetTokenId}"
-            data-original-stamina="${entry.originalStamina}"
+            data-original-perm="${entry.originalStamina.permanent}"
+            data-original-temp="${entry.originalStamina.temporary}"
             data-target-name="${entry.targetName}"
             style="
               background: #e76f51;
@@ -482,7 +545,7 @@ async function logDamageToChat(entry) {
       messageId: message.id
     });
 
-    console.log(`${MODULE_ID}: Logged to chat: ${entry.targetName} ${entry.type} (${entry.originalStamina} → ${entry.newStamina}) from ${entry.appliedByUser}`);
+    console.log(`${MODULE_ID}: Logged to chat: ${entry.targetName} ${entry.type} (Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent}) from ${entry.appliedByUser}`);
   } catch (error) {
     console.error(`${MODULE_ID}: logDamageToChat ERROR:`, error);
     console.error(`${MODULE_ID}: Stack trace:`, error.stack);
@@ -506,7 +569,8 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
     e.preventDefault();
     
     const targetTokenId = undoBtn.dataset.targetToken;
-    const originalStamina = parseInt(undoBtn.dataset.originalStamina);
+    const originalPerm = parseInt(undoBtn.dataset.originalPerm);
+    const originalTemp = parseInt(undoBtn.dataset.originalTemp);
     const targetName = undoBtn.dataset.targetName;
 
     if (!game.user.isGM) {
@@ -516,7 +580,8 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
     const result = await handleGMUndoDamage({
       targetTokenId,
-      originalStamina,
+      originalPerm,
+      originalTemp,
       targetName,
       messageId: message.id
     });
@@ -532,13 +597,13 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
               <span style="font-size: 0.8em; color: #666;">${undoTime}</span>
             </div>
             <div style="margin-bottom: 4px;">
-              <strong>${targetName}:</strong> Stamina restored to ${originalStamina}
+              <strong>${targetName}:</strong> Stamina restored
             </div>
           </div>
         `;
         await message.update({ content: updatedContent });
       }
-      ui.notifications.info(`Undo successful - ${targetName} restored to ${originalStamina} Stamina`);
+      ui.notifications.info(`Undo successful - ${targetName} stamina restored`);
     } else {
       ui.notifications.error(`Undo failed: ${result.error}`);
     }
@@ -547,8 +612,9 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
 /**
  * GM handler: Undo damage/healing
+ * Restores both permanent and temporary stamina
  */
-async function handleGMUndoDamage({ targetTokenId, originalStamina, targetName, messageId }) {
+async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, targetName, messageId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -559,19 +625,25 @@ async function handleGMUndoDamage({ targetTokenId, originalStamina, targetName, 
       return { success: false, error: "Token not found" };
     }
 
-    const actor = game.actors.get(token.actor.id);
+    // Use token.actor for fresh data (not stale game.actors cache)
+    const actor = token.actor;
     if (!actor) {
       return { success: false, error: "Actor not found" };
     }
 
-    console.log(`${MODULE_ID}: GM undoing damage to ${actor.name}, restoring Stamina to ${originalStamina}`);
+    console.log(`${MODULE_ID}: GM undoing damage to ${actor.name}, restoring Stamina to Perm=${originalPerm}, Temp=${originalTemp}`);
 
-    const currentStamina = getStamina(actor);
-    console.log(`${MODULE_ID}: Current Stamina: ${currentStamina}, Original: ${originalStamina}`);
+    const currentStamina = getStaminaSnapshot(actor);
+    console.log(`${MODULE_ID}: Current Stamina: Perm=${currentStamina.permanent}, Temp=${currentStamina.temporary}`);
 
-    // Directly set stamina to original value (respects actor type bounds)
-    const boundedStamina = applyStaminaBounds(actor, originalStamina);
-    await actor.update({'system.stamina.value': boundedStamina});
+    // Apply bounds to permanent stamina
+    const boundedStamina = applyStaminaBounds(actor, { permanent: originalPerm, temporary: originalTemp });
+    
+    // Restore both permanent and temporary stamina
+    await actor.update({
+      'system.stamina.value': boundedStamina.permanent,
+      'system.stamina.temporary': boundedStamina.temporary
+    });
 
     return {
       success: true,
