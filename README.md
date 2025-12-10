@@ -15,3 +15,10 @@ Foundry, by default, prevents players from applying damage tokens they don't own
 ## Requirements
 
 ⚠️ SocketLib is REQUIRED
+
+## Stuff I might add (mostly inspired by MIDI QOL)
+
+ - Batch Damage (Multiple Targets Summary)
+ - Sound Effects / Annimations - Or likely a seperate mod
+ - Damage History Log
+ - Configuration page to enable/features. 
