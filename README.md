@@ -10,7 +10,7 @@ Foundry, by default, prevents players from applying damage tokens they don't own
 - Notifcations (via PM) to GM/Director with undo capibilites for damage
 - Quick reminders to players if they accidently target themselves for damage. 
 
-<img width="297" height="185" alt="image" src="https://github.com/user-attachments/assets/174912af-6b64-431b-a326-fd8e57f4ec2c" />
+<img width="297" height="185" alt="Draw Steel Quick Strike in action" src="images/ds-quick-strike-demo.png" />
 
 ## Requirements
 
