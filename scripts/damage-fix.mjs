@@ -1,4 +1,4 @@
-import { MODULE_ID } from './constants.mjs';
+const MODULE_ID = 'ds-quick-strike';
 
 let socket;
 let damageHistory = [];
