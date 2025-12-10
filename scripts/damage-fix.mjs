@@ -27,6 +27,22 @@ Hooks.once('socketlib.ready', () => {
   }
 });
 
+// Also try to register if socketlib is already ready
+Hooks.on('ready', () => {
+  if (!socket && typeof socketlib !== 'undefined' && socketlib.socket) {
+    console.log(`${MODULE_ID}: Socketlib ready but hook missed, registering now...`);
+    try {
+      socket = socketlib.registerModule(MODULE_ID);
+      socket.register('applyDamageToTarget', handleGMDamageApplication);
+      socket.register('applyHealToTarget', handleGMHealApplication);
+      socket.register('undoLastDamage', handleGMUndoDamage);
+      console.log(`${MODULE_ID}: Socket registration successful on ready hook!`);
+    } catch (error) {
+      console.error(`${MODULE_ID}: Socket registration on ready failed:`, error);
+    }
+  }
+});
+
 // Also check if socketlib is available at all
 Hooks.once('ready', () => {
   console.log(`${MODULE_ID}: === SOCKET DEBUG CHECK ===`);
@@ -38,6 +54,20 @@ Hooks.once('ready', () => {
   console.log(`${MODULE_ID}: Module ID: '${MODULE_ID}'`);
   console.log(`${MODULE_ID}: Module manifest ID: '${game.modules.get(MODULE_ID)?.id}'`);
   console.log(`${MODULE_ID}: ===============================`);
+
+  // If socket didn't register, try registering now
+  if (!socket && typeof socketlib !== 'undefined') {
+    console.log(`${MODULE_ID}: Attempting late socket registration...`);
+    try {
+      socket = socketlib.registerModule(MODULE_ID);
+      socket.register('applyDamageToTarget', handleGMDamageApplication);
+      socket.register('applyHealToTarget', handleGMHealApplication);
+      socket.register('undoLastDamage', handleGMUndoDamage);
+      console.log(`${MODULE_ID}: Late socket registration successful!`);
+    } catch (error) {
+      console.error(`${MODULE_ID}: Late socket registration failed:`, error);
+    }
+  }
 });
 
 /**
