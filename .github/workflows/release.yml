@@ -36,8 +36,8 @@ jobs:
         run: |
           # Update version
           sed -i 's/"version": "[^"]*"/"version": "${{ env.VERSION }}"/' ds-quick-strike/module.json
-          # Update manifest URL
-          sed -i 's|"manifest": ".*"|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/module.json"|' ds-quick-strike/module.json
+          # Update manifest URL to use latest for automatic updates
+          sed -i 's|"manifest": ".*"|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/latest/download/module.json"|' ds-quick-strike/module.json
           # Update download URL
           sed -i 's|"download": ".*"|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/ds-quick-strike-${{ env.VERSION }}.zip"|' ds-quick-strike/module.json
           # Show the result
