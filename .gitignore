@@ -41,3 +41,30 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+
+# AI tool directories (keep locally but don't commit)
+.claude/
+.clinerules/
+.crush/
+.factory/
+.gemini/
+.kilocode/
+.opencode/
+.roo/
+
+# AI documentation files
+AGENTS.md
+CLAUDE.md
+CLINE.md
+Clean-Working-Implementation.md
+Draw-Steel-Socket-Implementation.md
+IMPLEMENTATION_SUMMARY.md
+
+# Old implementation files
+module-fixed.json
+module-minimal.json
+module-test.json
+scripts/damage-fixed.mjs
+
+# OpenSpec (development only)
+openspec/
