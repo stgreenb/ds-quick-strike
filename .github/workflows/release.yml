@@ -34,8 +34,14 @@ jobs:
 
       - name: Update module.json with version-specific URLs
         run: |
-          sed -i 's|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/latest/download/module.json"|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/module.json"|' ds-quick-strike/module.json
-          sed -i 's|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/[^/]\+/ds-quick-strike-[^.]*\.zip"|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/ds-quick-strike-${{ env.VERSION }}.zip"|' ds-quick-strike/module.json
+          # Update version
+          sed -i 's/"version": "[^"]*"/"version": "${{ env.VERSION }}"/' ds-quick-strike/module.json
+          # Update manifest URL
+          sed -i 's|"manifest": ".*"|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/module.json"|' ds-quick-strike/module.json
+          # Update download URL
+          sed -i 's|"download": ".*"|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/ds-quick-strike-${{ env.VERSION }}.zip"|' ds-quick-strike/module.json
+          # Show the result
+          cat ds-quick-strike/module.json
 
       - name: Verify assets exist
         run: |
