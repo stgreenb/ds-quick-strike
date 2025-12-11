@@ -68,3 +68,10 @@ scripts/damage-fixed.mjs
 
 # OpenSpec (development only)
 openspec/
+
+# Old development folders and files
+ds-quick-strike/
+ds-quick-strike.zip
+
+# Distribution files
+*.zip

@@ -28,11 +28,21 @@ Hooks.once('ready', () => {
   console.log(`${MODULE_ID}: Ready hook fired`);
   console.log(`${MODULE_ID}: User is GM: ${game.user.isGM}`);
   console.log(`${MODULE_ID}: Socket available: ${!!socket}`);
-  
+
+  // Register module settings
+  game.settings.register(MODULE_ID, 'publicDamageLog', {
+    name: 'Public Damage Log',
+    hint: 'Post damage and healing to public chat (undo buttons remain private)',
+    scope: 'world',
+    config: true,
+    type: Boolean,
+    default: false
+  });
+
   if (game.user.isGM) {
     hookIntoActorDamage();
   }
-  
+
   const waitForDrawSteel = () => {
     if (!globalThis.ds?.rolls?.DamageRoll) {
       setTimeout(waitForDrawSteel, 100);
@@ -462,21 +472,41 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
 }
 
 /**
- * Log damage/healing to chat as private message to GM
+ * Log damage/healing to chat (public or private based on setting)
  */
 async function logDamageToChat(entry) {
   try {
     console.log(`${MODULE_ID}: logDamageToChat called with:`, entry);
-    
+
     const icon = entry.type === 'damage' ? '⚔️' : '✨';
     const sourceLabel = entry.source === 'socket' ? `(via ${entry.sourcePlayerName})` : '(direct GM action)';
-    
+
     let staminaDisplay = `${entry.originalStamina.permanent} → ${entry.newStamina.permanent}`;
     if (entry.originalStamina.temporary > 0 || entry.newStamina.temporary > 0) {
       staminaDisplay = `Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent} | Temp: ${entry.originalStamina.temporary}→${entry.newStamina.temporary}`;
     }
-    
-    const content = `
+
+    const isPublic = game.settings.get(MODULE_ID, 'publicDamageLog');
+    console.log(`${MODULE_ID}: Public damage log setting: ${isPublic}`);
+
+    // Public message content (no undo button)
+    const publicContent = `
+      <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'damage' ? '#e76f51' : '#2a9d8f'};">
+        <div style="margin-bottom: 8px;">
+          <strong>${icon} ${entry.type === 'damage' ? 'DAMAGE' : 'HEALING'}</strong>
+        </div>
+        <div style="margin-bottom: 4px;">
+          <strong>${entry.targetName}</strong> hit by <strong>${entry.sourceActorName}</strong>
+        </div>
+        <div style="margin-bottom: 4px;">
+          ${entry.amount} ${entry.damageType}
+          (Stamina: ${staminaDisplay})
+        </div>
+      </div>
+    `;
+
+    // Private GM message content (with undo button)
+    const privateContent = `
       <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'damage' ? '#e76f51' : '#2a9d8f'};">
         <div style="margin-bottom: 8px;">
           <strong>${icon} ${entry.type === 'damage' ? 'DAMAGE' : 'HEALING'}</strong>
@@ -486,12 +516,12 @@ async function logDamageToChat(entry) {
           <strong>${entry.targetName}</strong> hit by <strong>${entry.sourceActorName}</strong>
         </div>
         <div style="margin-bottom: 4px;">
-          ${entry.amount} ${entry.damageType} 
+          ${entry.amount} ${entry.damageType}
           (Stamina: ${staminaDisplay})
         </div>
         <div style="margin-top: 8px;">
-          <button 
-            class="damage-undo-btn" 
+          <button
+            class="damage-undo-btn"
             data-target-token="${entry.targetTokenId}"
             data-original-perm="${entry.originalStamina.permanent}"
             data-original-temp="${entry.originalStamina.temporary}"
@@ -513,18 +543,71 @@ async function logDamageToChat(entry) {
       </div>
     `;
 
-    const gmUsers = game.users.filter(u => u.isGM && u.active).map(u => u.id);
-    console.log(`${MODULE_ID}: GM users to whisper to:`, gmUsers);
-    
-    const messageData = {
-      content: content,
-      whisper: gmUsers
-    };
+    // Rich compact undo for public mode (GM only) - shows damage amount and stamina change
+    const damageSymbol = entry.type === 'damage' ? '−' : '+';
+    const undoColor = entry.type === 'damage' ? '#e76f51' : '#2a9d8f';
 
-    console.log(`${MODULE_ID}: Creating chat message with data:`, messageData);
-    const message = await ChatMessage.create(messageData);
+    const compactUndoContent = `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 11px;">
+        <button
+          class="damage-undo-btn"
+          data-target-token="${entry.targetTokenId}"
+          data-original-perm="${entry.originalStamina.permanent}"
+          data-original-temp="${entry.originalStamina.temporary}"
+          data-target-name="${entry.targetName}"
+          style="
+            background: ${undoColor};
+            color: white;
+            border: none;
+            padding: 3px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 10px;
+            white-space: nowrap;
+            flex-shrink: 0;
+          "
+        >
+          ↶ Undo
+        </button>
+        <span style="color: #333; font-weight: 600;">${entry.targetName}</span>
+        <span style="color: #999;">${damageSymbol}${entry.amount} (Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent})</span>
+      </div>
+    `;
+
+    let message;
+    if (isPublic) {
+      // Create public message first (no whisper = broadcast to all)
+      console.log(`${MODULE_ID}: Creating public chat message`);
+      const publicMessage = await ChatMessage.create({
+        content: publicContent,
+        whisper: [] // Empty array = broadcast to all players
+      });
+
+      // Then create compact undo button (GM only)
+      const gmUsers = game.users.filter(u => u.isGM && u.active).map(u => u.id);
+      console.log(`${MODULE_ID}: GM users to whisper to:`, gmUsers);
+
+      message = await ChatMessage.create({
+        content: compactUndoContent,
+        whisper: gmUsers
+      });
+    } else {
+      // Private mode: only send to GMs with full content
+      const gmUsers = game.users.filter(u => u.isGM && u.active).map(u => u.id);
+      console.log(`${MODULE_ID}: GM users to whisper to:`, gmUsers);
+
+      const messageData = {
+        content: privateContent,
+        whisper: gmUsers
+      };
+
+      console.log(`${MODULE_ID}: Creating private chat message with data:`, messageData);
+      message = await ChatMessage.create(messageData);
+    }
+
     console.log(`${MODULE_ID}: Chat message created:`, message.id);
-    
+
     await message.setFlag(MODULE_ID, 'damageEntry', {
       ...entry,
       messageId: message.id
@@ -624,11 +707,34 @@ async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, t
     console.log(`${MODULE_ID}: Current Stamina: Perm=${currentStamina.permanent}, Temp=${currentStamina.temporary}`);
 
     const boundedStamina = applyStaminaBounds(actor, { permanent: originalPerm, temporary: originalTemp });
-    
+
     await actor.update({
       'system.stamina.value': boundedStamina.permanent,
       'system.stamina.temporary': boundedStamina.temporary
     });
+
+    // Log undo audit trail
+    const undoTime = new Date().toLocaleTimeString();
+    const undoMessage = `
+      <div style="font-family: monospace; padding: 8px; border-left: 3px solid #2a9d8f;">
+        <div style="margin-bottom: 4px;">
+          <strong>✅ Undo applied:</strong> ${targetName} stamina restored
+          (was ${currentStamina.permanent}→${boundedStamina.permanent}) at ${undoTime}
+        </div>
+      </div>
+    `;
+
+    const gmUsers = game.users.filter(u => u.isGM && u.active).map(u => u.id);
+    await ChatMessage.create({
+      content: undoMessage,
+      whisper: gmUsers
+    });
+
+    // Store undoTime in damageHistory for tracking
+    const historyEntry = damageHistory.find(h => h.messageId === messageId);
+    if (historyEntry) {
+      historyEntry.undoTime = undoTime;
+    }
 
     return {
       success: true,
