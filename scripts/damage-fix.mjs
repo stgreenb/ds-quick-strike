@@ -185,6 +185,14 @@ function installDamageOverride() {
       console.log(`${MODULE_ID}: DEBUG - message.speaker:`, message.speaker);
       console.log(`${MODULE_ID}: DEBUG - message.flags:`, message.flags);
       console.log(`${MODULE_ID}: DEBUG - message.rolls[${rollIndex}]:`, message.rolls[rollIndex]);
+      console.log(`${MODULE_ID}: DEBUG - message.system:`, message.system);
+      console.log(`${MODULE_ID}: DEBUG - message.system keys:`, Object.keys(message.system || {}));
+      console.log(`${MODULE_ID}: DEBUG - message.flavor:`, message.flavor);
+      console.log(`${MODULE_ID}: DEBUG - message.data:`, message.data);
+      if (message.system?.ability) {
+        console.log(`${MODULE_ID}: DEBUG - message.system.ability:`, message.system.ability);
+        console.log(`${MODULE_ID}: DEBUG - ability keys:`, Object.keys(message.system.ability || {}));
+      }
 
       if (message.speaker?.actor) {
         const sourceActor = game.actors.get(message.speaker.actor);
