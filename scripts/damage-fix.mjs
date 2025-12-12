@@ -208,6 +208,17 @@ function installDamageOverride() {
               sourceItemName = sourceItem.name;
               console.log(`${MODULE_ID}: Found source item: ${sourceItemName}`);
             }
+          } else if (message.system?.uuid) {
+            // Draw Steel stores ability UUID in message.system.uuid
+            try {
+              const sourceItem = await fromUuid(message.system.uuid);
+              if (sourceItem) {
+                sourceItemName = sourceItem.name;
+                console.log(`${MODULE_ID}: Found source item from UUID: ${sourceItemName}`);
+              }
+            } catch (e) {
+              console.warn(`${MODULE_ID}: Could not load item from UUID: ${message.system.uuid}`, e);
+            }
           }
         }
       }
