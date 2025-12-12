@@ -178,18 +178,30 @@ function installDamageOverride() {
       // Get source actor name and ID from message speaker
       let sourceActorName = 'Unknown Source';
       let sourceActorId = null;
+      let sourceItemName = 'Attack';  // Default to 'Attack' if no item found
+
       if (message.speaker?.actor) {
         const sourceActor = game.actors.get(message.speaker.actor);
         if (sourceActor) {
           sourceActorName = sourceActor.name;
           sourceActorId = sourceActor.id;
+
+          // Try to get the actual ability/weapon name from the message
+          // The message speaker.item might contain the item being used
+          if (message.speaker?.item) {
+            const sourceItem = sourceActor.items.get(message.speaker.item);
+            if (sourceItem) {
+              sourceItemName = sourceItem.name;
+              console.log(`${MODULE_ID}: Found source item: ${sourceItemName}`);
+            }
+          }
         }
       }
 
       // Always use socket handlers for consistent logging
       if (socket) {
-        console.log(`${MODULE_ID}: Redirecting to GM via socket (source: ${sourceActorName})`);
-        await applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId);
+        console.log(`${MODULE_ID}: Redirecting to GM via socket (source: ${sourceActorName}, ability: ${sourceItemName})`);
+        await applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName);
       } else {
         console.log(`${MODULE_ID}: No socket available, using original damage application`);
         await originalCallback.call(this, event);
@@ -257,7 +269,7 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
 /**
  * Send damage request to GM via socket
  */
-async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId) {
+async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName) {
   try {
     for (const target of targets) {
       console.log(`${MODULE_ID}: Sending damage request for ${target.name}`);
@@ -272,6 +284,7 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sour
           type: roll.type,
           sourceActorName: sourceActorName,
           sourceActorId: sourceActorId,
+          sourceItemName: sourceItemName,
           sourcePlayerName: game.user.name,
           sourceItemId: roll.sourceItemId || null,
           eventId: eventId
@@ -290,6 +303,7 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sour
           ignoredImmunities: roll.ignoredImmunities || [],
           sourceActorName: sourceActorName,
           sourceActorId: sourceActorId,
+          sourceItemName: sourceItemName,
           sourcePlayerName: game.user.name,
           sourceItemId: roll.sourceItemId || null,
           eventId: eventId
@@ -351,7 +365,7 @@ function applyStaminaBounds(actor, staminaSnapshot) {
 /**
  * GM handler: Apply damage to a target
  */
-async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, sourceActorName, sourceActorId, sourcePlayerName, sourceItemId, eventId }) {
+async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, sourceActorName, sourceActorId, sourceItemName, sourcePlayerName, sourceItemId, eventId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -401,6 +415,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
         newStamina: newStamina,
         sourceActorId: sourceActorId || game.user.id, // Use actual source actor ID or fall back to GM user ID
         sourceActorName: sourceActorName,
+        sourceItemName: sourceItemName,
         sourcePlayerName: sourcePlayerName,
         source: 'socket',
         sourceItemId: sourceItemId,
@@ -426,7 +441,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
 /**
  * GM handler: Apply healing to a target
  */
-async function handleGMHealApplication({ tokenId, amount, type, sourceActorName, sourceActorId, sourcePlayerName, sourceItemId, eventId }) {
+async function handleGMHealApplication({ tokenId, amount, type, sourceActorName, sourceActorId, sourceItemName, sourcePlayerName, sourceItemId, eventId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -482,6 +497,7 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
         newStamina: newStamina,
         sourceActorId: sourceActorId || game.user.id, // Use actual source actor ID or fall back to GM user ID
         sourceActorName: sourceActorName,
+        sourceItemName: sourceItemName,
         sourcePlayerName: sourcePlayerName,
         source: 'socket',
         sourceItemId: sourceItemId,
@@ -725,6 +741,7 @@ async function prepareHookPayload(entry) {
       sourceActorUuid: sourceActor?.uuid || null,
       sourceTokenId: sourceTokenData?.id || null,
       sourceTokenUuid: sourceTokenData?.uuid || null,
+      sourceItemName: entry.sourceItemName || 'Attack',  // Add source item name with default
       sourceItemId: entry.sourceItemId || null,
       sourceItemUuid: sourceItem?.uuid || null,
       sourceItem: sourceItem ? {
