@@ -175,19 +175,21 @@ function installDamageOverride() {
         return; // User cancelled self-damage
       }
 
-      // Get source actor name from message speaker
+      // Get source actor name and ID from message speaker
       let sourceActorName = 'Unknown Source';
+      let sourceActorId = null;
       if (message.speaker?.actor) {
         const sourceActor = game.actors.get(message.speaker.actor);
         if (sourceActor) {
           sourceActorName = sourceActor.name;
+          sourceActorId = sourceActor.id;
         }
       }
 
       // Always use socket handlers for consistent logging
       if (socket) {
         console.log(`${MODULE_ID}: Redirecting to GM via socket (source: ${sourceActorName})`);
-        await applyDamageViaSocket(targets, roll, amount, sourceActorName);
+        await applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId);
       } else {
         console.log(`${MODULE_ID}: No socket available, using original damage application`);
         await originalCallback.call(this, event);
@@ -255,7 +257,7 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
 /**
  * Send damage request to GM via socket
  */
-async function applyDamageViaSocket(targets, roll, amount, sourceActorName) {
+async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId) {
   try {
     for (const target of targets) {
       console.log(`${MODULE_ID}: Sending damage request for ${target.name}`);
@@ -269,6 +271,7 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName) {
           amount: amount,
           type: roll.type,
           sourceActorName: sourceActorName,
+          sourceActorId: sourceActorId,
           sourcePlayerName: game.user.name,
           sourceItemId: roll.sourceItemId || null,
           eventId: eventId
@@ -286,6 +289,7 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName) {
           type: roll.type,
           ignoredImmunities: roll.ignoredImmunities || [],
           sourceActorName: sourceActorName,
+          sourceActorId: sourceActorId,
           sourcePlayerName: game.user.name,
           sourceItemId: roll.sourceItemId || null,
           eventId: eventId
@@ -347,7 +351,7 @@ function applyStaminaBounds(actor, staminaSnapshot) {
 /**
  * GM handler: Apply damage to a target
  */
-async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, sourceActorName, sourcePlayerName, sourceItemId, eventId }) {
+async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, sourceActorName, sourceActorId, sourcePlayerName, sourceItemId, eventId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -395,7 +399,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
         targetActorId: actor.id,
         originalStamina: originalStamina,
         newStamina: newStamina,
-        sourceActorId: game.user.id, // Use GM user ID as source actor
+        sourceActorId: sourceActorId || game.user.id, // Use actual source actor ID or fall back to GM user ID
         sourceActorName: sourceActorName,
         sourcePlayerName: sourcePlayerName,
         source: 'socket',
@@ -422,7 +426,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
 /**
  * GM handler: Apply healing to a target
  */
-async function handleGMHealApplication({ tokenId, amount, type, sourceActorName, sourcePlayerName, sourceItemId, eventId }) {
+async function handleGMHealApplication({ tokenId, amount, type, sourceActorName, sourceActorId, sourcePlayerName, sourceItemId, eventId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -476,7 +480,7 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
         targetActorId: actor.id,
         originalStamina: originalStamina,
         newStamina: newStamina,
-        sourceActorId: game.user.id, // Use GM user ID as source actor
+        sourceActorId: sourceActorId || game.user.id, // Use actual source actor ID or fall back to GM user ID
         sourceActorName: sourceActorName,
         sourcePlayerName: sourcePlayerName,
         source: 'socket',
