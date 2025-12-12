@@ -20,7 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UUID Support**: Full UUID support for cross-scene token resolution
 - **Robust Token Helpers**: New `getSourceToken()` and `getTargetToken()` functions with comprehensive error handling
 - **Event Correlation**: Unique eventId system pairs damage applications with undo events
-- **Module Relationship**: Now recommends ds-quick-strike-animations module for enhanced visual experience
 
 ### Improved
 - **Backward Compatibility**: All changes are additive - existing functionality unchanged

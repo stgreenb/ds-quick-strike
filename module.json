@@ -27,15 +27,7 @@
       }
     }
   ],
-  "relationships": {
-    "recommends": [
-      {
-        "id": "ds-quick-strike-animations",
-        "type": "module"
-      }
-    ]
-  },
-  "esmodules": [
+    "esmodules": [
     "scripts/damage-fix.mjs"
   ]
 }
