@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2025-12-11
+
+### Added
+- **Animation Hook System**: Complete hook infrastructure for external animation modules
+- New `ds-quick-strike:damageApplied` hook fires with comprehensive payload data including:
+  - Source and target tokens (IDs and UUIDs)
+  - Source item information and keywords
+  - Damage type, amount, and metadata
+  - Unique eventId for correlation
+- New `ds-quick-strike:damageUndone` hook fires when damage is undone with matching eventId
+- **Source Item Tracking**: Optional capture of sourceItemId through damage pipeline
+- **Keyword Extraction**: Semantic keywords extracted from Draw Steel abilities for animation selection
+- **UUID Support**: Full UUID support for cross-scene token resolution
+- **Robust Token Helpers**: New `getSourceToken()` and `getTargetToken()` functions with comprehensive error handling
+- **Event Correlation**: Unique eventId system pairs damage applications with undo events
+- **Module Relationship**: Now recommends ds-quick-strike-animations module for enhanced visual experience
+
+### Improved
+- **Backward Compatibility**: All changes are additive - existing functionality unchanged
+- **Error Handling**: Hook errors logged but don't interrupt damage flow
+- **Socket Consistency**: Source data preserved through both direct and socket-based damage applications
+- **Performance**: Minimal overhead - hooks fire once per damage application
+
+### Technical Details
+- Hook payload schema explicitly documented for third-party module compatibility
+- Keywords are animation-agnostic (e.g., ["melee", "slash", "fire"] vs ["jb2a-sword-slash-01"])
+- Graceful handling of missing source items and tokens
+- Comprehensive test coverage for edge cases and error scenarios
+
+### Example Usage
+```javascript
+// Listen to damage events for animations
+Hooks.on('ds-quick-strike:damageApplied', (payload) => {
+  console.log(`Damage applied: ${payload.amount} ${payload.damageType}`);
+  console.log(`Keywords: ${payload.keywords.join(', ')}`);
+  console.log(`Event ID: ${payload.eventId}`);
+});
+```
+
 ## [1.5.1] - 2025-12-10
 
 ### Added

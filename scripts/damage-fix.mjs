@@ -84,15 +84,24 @@ function wrapActorTakeDamage(actor) {
 
   actor.system.takeDamage = async function(amount, options = {}) {
     const preStamina = getStaminaSnapshot(actor);
-    
+
     const result = await originalTakeDamage(amount, options);
-    
+
     const postStamina = getStaminaSnapshot(actor);
     const damageType = options.type || 'untyped';
 
     const caller = new Error().stack;
-    const isSocketCall = caller.includes('handleGMDamageApplication') || 
+    const isSocketCall = caller.includes('handleGMDamageApplication') ||
                          caller.includes('handleGMHealApplication');
+
+    // Extract optional sourceItemId for animation tracking
+    const sourceItemId = options.sourceItemId || null;
+
+    // Generate unique eventId for damage-undo correlation
+    const eventId = `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Get source actor ID (try character first, then user ID)
+    const sourceActorId = game.user.character?.id || game.user.id;
 
     // Log damage ONLY if NOT coming from socket (to avoid double-logging)
     if (!isSocketCall && amount > 0) {
@@ -105,9 +114,12 @@ function wrapActorTakeDamage(actor) {
         targetActorId: actor.id,
         originalStamina: preStamina,
         newStamina: postStamina,
-        sourceActorName: game.user.character?.name || game.user.name,
+        sourceActorId: sourceActorId,
         sourcePlayerName: game.user.name,
-        source: 'direct'
+        source: 'direct',
+        sourceItemId: sourceItemId,
+        eventId: eventId,
+        timestamp: Date.now()
       });
     }
 
@@ -248,13 +260,18 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName) {
     for (const target of targets) {
       console.log(`${MODULE_ID}: Sending damage request for ${target.name}`);
 
+      // Generate eventId for this damage application
+      const eventId = `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
       if (roll.isHeal) {
         const result = await socket.executeAsGM('applyHealToTarget', {
           tokenId: target.id,
           amount: amount,
           type: roll.type,
           sourceActorName: sourceActorName,
-          sourcePlayerName: game.user.name
+          sourcePlayerName: game.user.name,
+          sourceItemId: roll.sourceItemId || null,
+          eventId: eventId
         });
 
         if (result.success) {
@@ -269,7 +286,9 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName) {
           type: roll.type,
           ignoredImmunities: roll.ignoredImmunities || [],
           sourceActorName: sourceActorName,
-          sourcePlayerName: game.user.name
+          sourcePlayerName: game.user.name,
+          sourceItemId: roll.sourceItemId || null,
+          eventId: eventId
         });
 
         if (result.success) {
@@ -328,7 +347,7 @@ function applyStaminaBounds(actor, staminaSnapshot) {
 /**
  * GM handler: Apply damage to a target
  */
-async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, sourceActorName, sourcePlayerName }) {
+async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunities, sourceActorName, sourcePlayerName, sourceItemId, eventId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -351,17 +370,18 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
 
     await actor.system.takeDamage(amount, {
       type: type,
-      ignoredImmunities: ignoredImmunities || []
+      ignoredImmunities: ignoredImmunities || [],
+      sourceItemId: sourceItemId
     });
 
     let newStamina = getStaminaSnapshot(actor);
     newStamina = applyStaminaBounds(actor, newStamina);
-    
+
     if (newStamina.permanent !== getStaminaSnapshot(actor).permanent) {
       console.log(`${MODULE_ID}: Applying stamina bounds: ${getStaminaSnapshot(actor).permanent} → ${newStamina.permanent}`);
       await actor.update({'system.stamina.value': newStamina.permanent});
     }
-    
+
     console.log(`${MODULE_ID}: Post-damage stamina: Perm=${newStamina.permanent}, Temp=${newStamina.temporary}`);
 
     console.log(`${MODULE_ID}: About to log damage to chat: ${actor.name} (Perm: ${originalStamina.permanent}→${newStamina.permanent}, Temp: ${originalStamina.temporary}→${newStamina.temporary})`);
@@ -375,9 +395,13 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
         targetActorId: actor.id,
         originalStamina: originalStamina,
         newStamina: newStamina,
+        sourceActorId: game.user.id, // Use GM user ID as source actor
         sourceActorName: sourceActorName,
         sourcePlayerName: sourcePlayerName,
-        source: 'socket'
+        source: 'socket',
+        sourceItemId: sourceItemId,
+        eventId: eventId,
+        timestamp: Date.now()
       });
       console.log(`${MODULE_ID}: Successfully logged damage to chat`);
     } catch (logError) {
@@ -398,7 +422,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
 /**
  * GM handler: Apply healing to a target
  */
-async function handleGMHealApplication({ tokenId, amount, type, sourceActorName, sourcePlayerName }) {
+async function handleGMHealApplication({ tokenId, amount, type, sourceActorName, sourcePlayerName, sourceItemId, eventId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -452,9 +476,13 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
         targetActorId: actor.id,
         originalStamina: originalStamina,
         newStamina: newStamina,
+        sourceActorId: game.user.id, // Use GM user ID as source actor
         sourceActorName: sourceActorName,
         sourcePlayerName: sourcePlayerName,
-        source: 'socket'
+        source: 'socket',
+        sourceItemId: sourceItemId,
+        eventId: eventId,
+        timestamp: Date.now()
       });
     } catch (logError) {
       console.error(`${MODULE_ID}: Error logging heal to chat:`, logError);
@@ -488,6 +516,9 @@ async function logDamageToChat(entry) {
 
     const isPublic = game.settings.get(MODULE_ID, 'publicDamageLog');
     console.log(`${MODULE_ID}: Public damage log setting: ${isPublic}`);
+
+    // Extract source data and prepare hook payload
+    const hookPayload = await prepareHookPayload(entry);
 
     // Public message content (no undo button)
     const publicContent = `
@@ -526,6 +557,7 @@ async function logDamageToChat(entry) {
             data-original-perm="${entry.originalStamina.permanent}"
             data-original-temp="${entry.originalStamina.temporary}"
             data-target-name="${entry.targetName}"
+            data-event-id="${entry.eventId || ''}"
             style="
               background: #e76f51;
               color: white;
@@ -555,6 +587,7 @@ async function logDamageToChat(entry) {
           data-original-perm="${entry.originalStamina.permanent}"
           data-original-temp="${entry.originalStamina.temporary}"
           data-target-name="${entry.targetName}"
+          data-event-id="${entry.eventId || ''}"
           style="
             background: ${undoColor};
             color: white;
@@ -618,11 +651,149 @@ async function logDamageToChat(entry) {
       messageId: message.id
     });
 
+    // Fire animation hook after chat message is created
+    if (hookPayload) {
+      try {
+        Hooks.callAll('ds-quick-strike:damageApplied', hookPayload);
+        console.log(`${MODULE_ID}: Fired ds-quick-strike:damageApplied hook with eventId: ${hookPayload.eventId}`);
+      } catch (hookError) {
+        console.error(`${MODULE_ID}: Error firing damageApplied hook:`, hookError);
+        // Continue without breaking the damage flow
+      }
+    }
+
     console.log(`${MODULE_ID}: Logged to chat: ${entry.targetName} ${entry.type} (Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent}) from ${entry.sourceActorName}`);
   } catch (error) {
     console.error(`${MODULE_ID}: logDamageToChat ERROR:`, error);
     console.error(`${MODULE_ID}: Stack trace:`, error.stack);
   }
+}
+
+/**
+ * Prepare hook payload with all required data for animation modules
+ */
+async function prepareHookPayload(entry) {
+  try {
+    // Get source actor and item data
+    let sourceActor = null;
+    let sourceItem = null;
+    let keywords = [];
+
+    if (entry.sourceItemId) {
+      // Try to get source actor first
+      if (entry.sourceActorId) {
+        sourceActor = game.actors.get(entry.sourceActorId);
+      }
+
+      // Get source item and extract keywords
+      if (sourceActor && entry.sourceItemId) {
+        sourceItem = sourceActor.items.get(entry.sourceItemId);
+        if (sourceItem?.system?.keywords) {
+          keywords = sourceItem.system.keywords;
+        }
+      }
+    } else {
+      // Even without sourceItemId, try to get source actor from entry
+      if (entry.sourceActorId) {
+        sourceActor = game.actors.get(entry.sourceActorId);
+      }
+    }
+
+    // Get source token data
+    const sourceTokenData = sourceActor ? getSourceToken(sourceActor) : null;
+
+    // Get target actor and token data
+    const targetActor = game.actors.get(entry.targetActorId);
+    const targetTokenData = getTargetToken(entry.targetTokenId);
+
+    // Sanitize damage type - default to 'damage' if empty
+    const damageType = entry.damageType || 'damage';
+
+    // Build the hook payload without circular references
+    const payload = {
+      // Core damage data
+      type: entry.type,
+      amount: entry.amount,
+      damageType: damageType,
+
+      // Source information
+      sourceActorId: entry.sourceActorId || null,
+      sourceActorUuid: sourceActor?.uuid || null,
+      sourceTokenId: sourceTokenData?.id || null,
+      sourceTokenUuid: sourceTokenData?.uuid || null,
+      sourceItemId: entry.sourceItemId || null,
+      sourceItemUuid: sourceItem?.uuid || null,
+      sourceItem: sourceItem ? {
+        id: sourceItem.id,
+        name: sourceItem.name,
+        type: sourceItem.type,
+        img: sourceItem.img
+      } : null,
+
+      // Target information (without circular token reference)
+      targetActorId: entry.targetActorId,
+      targetActorUuid: targetActor?.uuid || null,
+      targetTokenId: targetTokenData?.id || null,
+      targetTokenUuid: targetTokenData?.uuid || null,
+      targetActor: targetActor ? {
+        id: targetActor.id,
+        name: targetActor.name,
+        type: targetActor.type,
+        img: targetActor.img
+      } : null,
+
+      // Animation data
+      keywords: keywords,
+
+      // Metadata
+      eventId: entry.eventId || `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: entry.timestamp || Date.now(),
+      isCritical: entry.isCritical || false,
+      isHealing: entry.type === 'heal',
+      isApplied: true
+    };
+
+    return payload;
+  } catch (error) {
+    console.error(`${MODULE_ID}: Error preparing hook payload:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get source token from actor with UUID support
+ * @param {Actor} actor - The source actor
+ * @returns {Object|null} Token object with id and uuid, or null if not found
+ */
+function getSourceToken(actor) {
+  if (!actor) return null;
+
+  const token = actor.getActiveTokens()?.[0] || null;
+  if (!token) return null;
+
+  return {
+    id: token.id,
+    uuid: token.document?.uuid || null,
+    token: token
+  };
+}
+
+/**
+ * Get target token from canvas with UUID support
+ * @param {string|null} tokenId - The token ID
+ * @returns {Object|null} Token object with id and uuid, or null if not found
+ */
+function getTargetToken(tokenId) {
+  if (!tokenId) return null;
+
+  const token = canvas.tokens.get(tokenId) || null;
+  if (!token) return null;
+
+  return {
+    id: token.id,
+    uuid: token.document?.uuid || null,
+    token: token
+  };
 }
 
 /**
@@ -639,11 +810,12 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
   undoBtn.addEventListener('click', async (e) => {
     e.preventDefault();
-    
+
     const targetTokenId = undoBtn.dataset.targetToken;
     const originalPerm = parseInt(undoBtn.dataset.originalPerm);
     const originalTemp = parseInt(undoBtn.dataset.originalTemp);
     const targetName = undoBtn.dataset.targetName;
+    const eventId = undoBtn.dataset.eventId || null;
 
     if (!game.user.isGM) {
       ui.notifications.error("Only GM can undo damage");
@@ -655,7 +827,8 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
       originalPerm,
       originalTemp,
       targetName,
-      messageId: message.id
+      messageId: message.id,
+      eventId: eventId
     });
 
     if (result.success) {
@@ -685,7 +858,7 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 /**
  * GM handler: Undo damage/healing
  */
-async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, targetName, messageId }) {
+async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, targetName, messageId, eventId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -734,6 +907,36 @@ async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, t
     const historyEntry = damageHistory.find(h => h.messageId === messageId);
     if (historyEntry) {
       historyEntry.undoTime = undoTime;
+    }
+
+    // Fire animation undo hook
+    if (eventId) {
+      try {
+        const targetTokenData = getTargetToken(targetTokenId);
+        const undoPayload = {
+          // Correlation data
+          eventId: eventId,
+
+          // Target information
+          targetName: targetName,
+          targetTokenId: targetTokenData?.id || null,
+          targetTokenUuid: targetTokenData?.uuid || null,
+          targetToken: targetTokenData?.token || null,
+
+          // Damage data being undone
+          amount: Math.abs(boundedStamina.permanent - currentStamina.permanent),
+          damageType: historyEntry?.damageType || 'untyped',
+
+          // Original entry
+          entry: historyEntry || null
+        };
+
+        Hooks.callAll('ds-quick-strike:damageUndone', undoPayload);
+        console.log(`${MODULE_ID}: Fired ds-quick-strike:damageUndone hook with eventId: ${eventId}`);
+      } catch (hookError) {
+        console.error(`${MODULE_ID}: Error firing damageUndone hook:`, hookError);
+        // Continue without breaking the undo flow
+      }
     }
 
     return {
