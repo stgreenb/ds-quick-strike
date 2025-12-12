@@ -2,7 +2,7 @@
   "id": "ds-quick-strike",
   "title": "Draw Steel Quick Strike",
   "description": "Damage redirection and logging for Draw Steel system with GM relay and animation hook support",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "authors": [
     {
       "name": "Draw Steel Community",
@@ -15,7 +15,7 @@
   },
   "url": "https://github.com/stgreenb/ds-quick-strike",
   "manifest": "https://github.com/stgreenb/ds-quick-strike/releases/latest/download/module.json",
-  "download": "https://github.com/stgreenb/ds-quick-strike/releases/download/1.6.2/ds-quick-strike-1.6.2.zip",
+  "download": "https://github.com/stgreenb/ds-quick-strike/releases/download/1.6.3/ds-quick-strike-1.6.3.zip",
   "socket": true,
   "relationships": {
     "requires": [

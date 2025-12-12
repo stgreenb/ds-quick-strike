@@ -180,6 +180,12 @@ function installDamageOverride() {
       let sourceActorId = null;
       let sourceItemName = 'Attack';  // Default to 'Attack' if no item found
 
+      // DEBUG: Log the entire message structure to find where ability name is
+      console.log(`${MODULE_ID}: DEBUG - Full message object:`, message);
+      console.log(`${MODULE_ID}: DEBUG - message.speaker:`, message.speaker);
+      console.log(`${MODULE_ID}: DEBUG - message.flags:`, message.flags);
+      console.log(`${MODULE_ID}: DEBUG - message.rolls[${rollIndex}]:`, message.rolls[rollIndex]);
+
       if (message.speaker?.actor) {
         const sourceActor = game.actors.get(message.speaker.actor);
         if (sourceActor) {
@@ -197,6 +203,8 @@ function installDamageOverride() {
           }
         }
       }
+
+      console.log(`${MODULE_ID}: sourceActorName=${sourceActorName}, sourceItemName=${sourceItemName}`);
 
       // Always use socket handlers for consistent logging
       if (socket) {
