@@ -1057,14 +1057,26 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
     return;
   }
 
+  console.log(`${MODULE_ID}: Processing chat message for status buttons...`);
+
   // Find all status application buttons (data-type="status" from Draw Steel)
   const statusButtons = html.querySelectorAll('button[data-type="status"][data-effect-id]');
+  console.log(`${MODULE_ID}: Found ${statusButtons.length} status buttons in message`);
 
-  statusButtons.forEach((btn) => {
+  statusButtons.forEach((btn, index) => {
+    console.log(`${MODULE_ID}: Status button ${index}:`, {
+      text: btn.textContent.trim(),
+      effectId: btn.dataset.effectId,
+      uuid: btn.dataset.uuid,
+      type: btn.dataset.type
+    });
+
     btn.addEventListener('click', async (event) => {
       event.preventDefault();
 
       try {
+        console.log(`${MODULE_ID}: ===== STATUS BUTTON CLICKED =====`);
+
         // Extract status info from button data attributes
         const statusId = btn.dataset.effectId;           // e.g. "slowed"
         const statusUuid = btn.dataset.uuid;             // Actor.xxx.Item.xxx.PowerRollEffect.xxx
@@ -1072,32 +1084,48 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
         console.log(`${MODULE_ID}: Status button clicked: ${statusName}`, { statusId, statusUuid });
 
-        // Get the ability data from the message
-        const abilityData = await extractAbilityDataFromMessage(message);
-        if (!abilityData) {
-          console.warn(`${MODULE_ID}: Could not extract ability data from message`);
-          ui.notifications.warn("Could not determine source ability");
-          return;
-        }
-
         // Get currently selected targets (user must have them selected, just like damage)
         const targets = Array.from(game.user.targets);
+        console.log(`${MODULE_ID}: Current targets:`, targets.map(t => `${t.name} (${t.id})`));
+
         if (!targets.length) {
+          console.warn(`${MODULE_ID}: No targets selected`);
           ui.notifications.warn("Select a target to apply status");
           return;
         }
 
         console.log(`${MODULE_ID}: Applying status ${statusName} to ${targets.length} target(s)`);
 
-        // Send via socket to GM for application
+        // Check if socket is available
         if (!socket) {
-          console.warn(`${MODULE_ID}: Socket not available, cannot apply status`);
+          console.error(`${MODULE_ID}: Socket not available, cannot apply status`);
           ui.notifications.error("Socket not available");
           return;
         }
 
+        // Create minimal ability data for now
+        const abilityData = {
+          sourceActorId: game.user.character?.id || game.user.id,
+          itemId: null,
+          itemName: 'Status Effect',
+          ability: {
+            name: 'Status Effect',
+            img: 'icons/svg/status.svg',
+            system: {
+              effects: [{
+                name: statusName,
+                id: statusId
+              }]
+            }
+          }
+        };
+
+        console.log(`${MODULE_ID}: Using ability data:`, abilityData);
+
         for (const target of targets) {
           try {
+            console.log(`${MODULE_ID}: Applying to target: ${target.name} (${target.id})`);
+
             const result = await socket.executeAsGM('applyStatusToTarget', {
               tokenId: target.id,
               statusName: statusName,
@@ -1111,9 +1139,12 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
               timestamp: Date.now()
             });
 
+            console.log(`${MODULE_ID}: Socket result for ${target.name}:`, result);
+
             if (result.success) {
               ui.notifications.info(`Applied ${statusName} to ${target.name}`);
             } else {
+              console.error(`${MODULE_ID}: Failed to apply status:`, result.error);
               ui.notifications.error(`Failed to apply ${statusName}: ${result.error}`);
             }
           } catch (error) {
@@ -1267,18 +1298,38 @@ async function handleGMApplyStatus({
   timestamp,
   eventId = null
 }) {
+  console.log(`${MODULE_ID}: ===== GM APPLY STATUS CALLED =====`);
+  console.log(`${MODULE_ID}: GM Status Request:`, {
+    tokenId,
+    statusName,
+    statusId,
+    statusUuid,
+    sourceActorId,
+    sourceItemId,
+    sourceItemName,
+    sourcePlayerName,
+    isGM: game.user?.isGM
+  });
+
   if (!game.user.isGM) {
+    console.error(`${MODULE_ID}: Not authorized - user is not GM`);
     return { success: false, error: "Unauthorized" };
   }
 
   try {
     const token = canvas.tokens.get(tokenId);
+    console.log(`${MODULE_ID}: Found token:`, token ? `${token.name} (${token.id})` : 'null');
+
     if (!token) {
+      console.error(`${MODULE_ID}: Token not found: ${tokenId}`);
       return { success: false, error: "Token not found" };
     }
 
     const actor = token.actor;
+    console.log(`${MODULE_ID}: Found actor:`, actor ? `${actor.name} (${actor.id})` : 'null');
+
     if (!actor) {
+      console.error(`${MODULE_ID}: Actor not found for token: ${tokenId}`);
       return { success: false, error: "Actor not found" };
     }
 
@@ -1444,9 +1495,40 @@ function buildActiveEffectFromAbility(
   sourceActorId,
   sourceItemId
 ) {
+  console.log(`${MODULE_ID}: ===== BUILDING ACTIVE EFFECT =====`);
+  console.log(`${MODULE_ID}: Input data:`, {
+    ability: ability ? 'present' : 'null',
+    statusName,
+    statusId,
+    statusUuid,
+    sourceActorId,
+    sourceItemId
+  });
+
   if (!ability) {
     console.warn(`${MODULE_ID}: No ability provided to build effect`);
-    return null;
+    // Create a minimal effect structure for testing
+    const minimalEffect = {
+      name: statusName,
+      icon: "icons/svg/status.svg",
+      origin: `Actor.${sourceActorId}.Item.${sourceItemId}`,
+      duration: { rounds: 1, startRound: 0, startTurn: 0 },
+      disabled: false,
+      flags: {
+        ds: {
+          statusName: statusName,
+          statusId: statusId,
+          statusUuid: statusUuid,
+          sourceItemId: sourceItemId,
+          sourceItemName: 'Status Effect',
+          enrich: `@ds/status[${statusName.toLowerCase().replace(/ /g, "-")}]`
+        }
+      },
+      changes: []
+    };
+
+    console.log(`${MODULE_ID}: Using minimal effect structure:`, minimalEffect);
+    return minimalEffect;
   }
 
   // Find the effect in the ability's effects array that matches the status name or ID
@@ -1454,9 +1536,33 @@ function buildActiveEffectFromAbility(
     e.name === statusName || e.id === statusId
   );
 
+  console.log(`${MODULE_ID}: Ability effects:`, ability.system?.effects);
+  console.log(`${MODULE_ID}: Found effect definition:`, effectDef);
+
   if (!effectDef) {
     console.warn(`${MODULE_ID}: Effect "${statusName}" not found in ability`, ability.name);
-    return null;
+    // Create a minimal effect structure for testing
+    const minimalEffect = {
+      name: statusName,
+      icon: ability.img || "icons/svg/status.svg",
+      origin: `Actor.${sourceActorId}.Item.${sourceItemId}`,
+      duration: { rounds: 1, startRound: 0, startTurn: 0 },
+      disabled: false,
+      flags: {
+        ds: {
+          statusName: statusName,
+          statusId: statusId,
+          statusUuid: statusUuid,
+          sourceItemId: sourceItemId,
+          sourceItemName: ability.name || 'Status Effect',
+          enrich: `@ds/status[${statusName.toLowerCase().replace(/ /g, "-")}]`
+        }
+      },
+      changes: []
+    };
+
+    console.log(`${MODULE_ID}: Using minimal effect structure (no effect found):`, minimalEffect);
+    return minimalEffect;
   }
 
   console.log(`${MODULE_ID}: Building effect from definition`, { statusName, statusId, effectDef });
