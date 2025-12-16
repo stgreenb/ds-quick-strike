@@ -1054,6 +1054,11 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
 // Hook status button clicks in chat (Draw Steel status application buttons)
 Hooks.on('renderChatMessageHTML', (message, html) => {
+  console.log(`${MODULE_ID}: ===== PROCESSING CHAT MESSAGE =====`);
+  console.log(`${MODULE_ID}: Message ID: ${message.id}`);
+  console.log(`${MODULE_ID}: Message content preview: ${message.content?.substring(0, 100)}...`);
+  console.log(`${MODULE_ID}: Message flavor: ${message.flavor}`);
+
   if (!(html instanceof HTMLElement)) {
     console.warn(`${MODULE_ID}: html is not an HTMLElement, skipping status handler`);
     return;
@@ -1061,8 +1066,9 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
   // DEBUG: Log ALL buttons in the message to see what we're working with
   const allButtons = html.querySelectorAll('button');
+  console.log(`${MODULE_ID}: Found ${allButtons.length} total buttons in message`);
+
   if (allButtons.length > 0) {
-    console.log(`${MODULE_ID}: Found ${allButtons.length} total buttons in message`);
     allButtons.forEach((btn, index) => {
       const dataset = {...btn.dataset};
       console.log(`${MODULE_ID}: Button ${index}:`, {
@@ -1075,9 +1081,19 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
   // Find all status application buttons (data-type="status" from Draw Steel)
   const statusButtons = html.querySelectorAll('button[data-type="status"]');
+  console.log(`${MODULE_ID}: Status selector: button[data-type="status"]`);
+  console.log(`${MODULE_ID}: Found ${statusButtons.length} status buttons in message`);
 
   if (statusButtons.length > 0) {
-    console.log(`${MODULE_ID}: Found ${statusButtons.length} status buttons in message`);
+    console.log(`${MODULE_ID}: ✅ Status buttons detected - attaching handlers`);
+    statusButtons.forEach((btn, index) => {
+      console.log(`${MODULE_ID}: Status button ${index} details:`, {
+        text: btn.textContent.trim(),
+        effectId: btn.dataset.effectId,
+        uuid: btn.dataset.uuid,
+        className: btn.className
+      });
+    });
   } else {
     // Try alternative selectors in case Draw Steel uses different attributes
     const altButtons1 = html.querySelectorAll('button[data-effect-id]');
@@ -1096,6 +1112,7 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
     btn.addEventListener('click', async (event) => {
       event.preventDefault();
+      event.stopPropagation(); // CRITICAL: Stop Draw Steel's default handler
 
       try {
         console.log(`${MODULE_ID}: ===== STATUS BUTTON CLICKED =====`);
