@@ -1053,6 +1053,25 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 });
 
 // =========================================================================
+// UNIVERSAL CLICK DETECTOR: See what's actually being clicked
+// =========================================================================
+document.addEventListener("click", (event) => {
+  const clicked = event.target;
+  const isButton = clicked.tagName === 'BUTTON' || clicked.closest('button');
+
+  if (isButton) {
+    const button = clicked.tagName === 'BUTTON' ? clicked : clicked.closest('button');
+    console.log(`${MODULE_ID}: 🖱️ BUTTON CLICKED:`, {
+      text: button.textContent?.trim(),
+      tag: button.tagName,
+      classes: button.className,
+      dataset: button.dataset,
+      attributes: Array.from(button.attributes).map(attr => `${attr.name}="${attr.value}"`)
+    });
+  }
+}, { capture: true });
+
+// =========================================================================
 // EVENT DELEGATION: Status Button Handler (CLEAN VERSION)
 // =========================================================================
 document.addEventListener("click", async (event) => {
