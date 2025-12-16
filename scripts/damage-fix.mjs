@@ -1,5 +1,12 @@
 const MODULE_ID = 'ds-quick-strike';
 
+// MINIMAL TEST HOOKS - Confirm file is loading correctly
+console.log("ds-quick-strike: file loaded vTEST");
+
+Hooks.once("ready", () => {
+  console.log("ds-quick-strike: ready TEST hook fired");
+});
+
 let socket;
 let damageHistory = [];
 const originalTakeDamageMap = new Map();
@@ -1052,35 +1059,21 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
   });
 });
 
-// =========================================================================
-// MINIMAL DIAGNOSTIC PROBES - Identify where the issue is
-// =========================================================================
-
-console.log("DSQS: file loaded top-level");
-
-Hooks.once("ready", () => {
-  console.log("DSQS: ready hook fired");
-
-  document.addEventListener("click", (event) => {
-    console.log("DSQS: document click seen", event.target.tagName);
-
-    const statusBtn = event.target.closest('button[data-type="status"]');
-    if (!statusBtn) return;
-
-    console.log("DSQS: status button matched", statusBtn.textContent?.trim());
-  }, true);
-});
-
-// ALSO TRY: Chat log element delegation (in case buttons live in chat DOM)
+// MINIMAL CHAT-SCOPED LISTENER - Test if buttons live in chat DOM
 Hooks.on("renderChatLog", (app, html) => {
-  console.log("DSQS: renderChatLog, wiring delegation on chat element");
+  console.log("ds-quick-strike: renderChatLog wired");
 
   html[0].addEventListener("click", (event) => {
-    console.log("DSQS: chat click", event.target.tagName);
+    console.log("ds-quick-strike: chat click", event.target.tagName);
+
     const statusBtn = event.target.closest('button[data-type="status"]');
     if (!statusBtn) return;
-    console.log("DSQS: chat status button matched", statusBtn.textContent?.trim());
-    // Minimal test - just log for now
+
+    console.log(
+      "ds-quick-strike: STATUS BUTTON",
+      statusBtn.textContent?.trim(),
+      statusBtn.dataset
+    );
   }, true);
 });
 
