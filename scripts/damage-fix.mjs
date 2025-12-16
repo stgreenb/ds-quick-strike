@@ -1102,10 +1102,11 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
         // Extract status info from button data attributes
         const statusId = btn.dataset.effectId;           // e.g. "slowed"
-        const statusUuid = btn.dataset.uuid;             // Actor.xxx.Item.xxx.PowerRollEffect.xxx
+        const statusUuid = btn.dataset.uuid;             // Actor.xxx.Item.xxx.PowerRollEffect.xxx (if available)
         const statusName = btn.textContent.trim();       // e.g. "Slowed"
 
         console.log(`${MODULE_ID}: Status button clicked: ${statusName}`, { statusId, statusUuid });
+        console.log(`${MODULE_ID}: Button dataset:`, btn.dataset);
 
         // Get currently selected targets (user must have them selected, just like damage)
         const targets = Array.from(game.user.targets);
