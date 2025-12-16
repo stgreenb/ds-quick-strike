@@ -1053,20 +1053,48 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 });
 
 // =========================================================================
-// EVENT DELEGATION: Intercept status button clicks BEFORE Draw Steel
+// BROAD DEBUGGING: Catch ALL button clicks to understand what's happening
 // =========================================================================
 document.addEventListener("click", (event) => {
+  // Debug ALL button clicks first
+  const clickedElement = event.target;
+  console.log(`${MODULE_ID}: ===== ELEMENT CLICKED =====`);
+  console.log(`${MODULE_ID}: Clicked element:`, clickedElement);
+  console.log(`${MODULE_ID}: Element tag:`, clickedElement.tagName);
+  console.log(`${MODULE_ID}: Element text:`, clickedElement.textContent?.trim());
+  console.log(`${MODULE_ID}: Element classes:`, clickedElement.className);
+  console.log(`${MODULE_ID}: Element dataset:`, clickedElement.dataset);
+
+  // Check if it's a button
+  const isButton = clickedElement.tagName === 'BUTTON' || clickedElement.closest('button');
+  if (isButton) {
+    const button = clickedElement.tagName === 'BUTTON' ? clickedElement : clickedElement.closest('button');
+    console.log(`${MODULE_ID}: ✅ It's a button!`);
+    console.log(`${MODULE_ID}: Button details:`, {
+      text: button.textContent?.trim(),
+      classes: button.className,
+      dataset: button.dataset
+    });
+  } else {
+    console.log(`${MODULE_ID}: ❌ Not a button, continuing...`);
+    return;
+  }
+
+  // =========================================================================
+  // EVENT DELEGATION: Intercept status button clicks BEFORE Draw Steel
+  // =========================================================================
   const statusBtn = event.target.closest('button[data-type="status"]');
-  if (!statusBtn) return;
+  if (statusBtn) {
+    console.log(`${MODULE_ID}: 🎯 FOUND STATUS BUTTON! Intercepting...`);
 
-  // **CRITICAL: Stop Draw Steel's handler from running**
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
+    // **CRITICAL: Stop Draw Steel's handler from running**
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
 
-  console.log(`${MODULE_ID}: ✓ Intercepted status button before Draw Steel handler`);
+    console.log(`${MODULE_ID}: ✓ Intercepted status button before Draw Steel handler`);
 
-  (async () => {
+    (async () => {
     try {
       // Find the message
       const messageElement = statusBtn.closest("[data-message-id]");
@@ -1148,6 +1176,9 @@ document.addEventListener("click", (event) => {
       ui.notifications.error("Error applying status");
     }
   })();
+  } else {
+    console.log(`${MODULE_ID}: ℹ️ Button found but not a status button (no data-type=\"status\")`);
+  }
 
 }, { capture: true }); // Capture phase runs BEFORE default handlers
 
