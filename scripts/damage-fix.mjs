@@ -1053,121 +1053,101 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 });
 
 // =========================================================================
-// UNIVERSAL CLICK DETECTOR: See what's actually being clicked
+// EVENT DELEGATION: Status Button Handler (PERMANENT DOCUMENT LISTENER)
 // =========================================================================
-document.addEventListener("click", (event) => {
-  const clicked = event.target;
-  const isButton = clicked.tagName === 'BUTTON' || clicked.closest('button');
+// This works because it listens on document (always exists) regardless of when
+// Draw Steel renders the buttons. Uses capture phase to intercept before handlers.
 
-  if (isButton) {
-    const button = clicked.tagName === 'BUTTON' ? clicked : clicked.closest('button');
-    console.log(`${MODULE_ID}: 🖱️ BUTTON CLICKED:`, {
-      text: button.textContent?.trim(),
-      tag: button.tagName,
-      classes: button.className,
-      dataset: button.dataset,
-      attributes: Array.from(button.attributes).map(attr => `${attr.name}="${attr.value}"`)
-    });
-  }
-}, { capture: true });
+Hooks.once("ready", () => {
+  console.log(`${MODULE_ID}: Installing status button event delegation...`);
 
-// =========================================================================
-// EVENT DELEGATION: Status Button Handler (CLEAN VERSION)
-// =========================================================================
-document.addEventListener("click", async (event) => {
-  // Try to find a status button
-  const statusBtn = event.target.closest('button[data-type="status"]');
-  if (!statusBtn) return; // Not a status button, skip
+  document.addEventListener("click", async (event) => {
+    // Match status button from ANY click that bubbles up
+    const statusBtn = event.target.closest('button[data-type="status"]');
+    if (!statusBtn) return;
 
-  // This IS a status button - intercept it
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
+    // FOUND IT - intercept before Draw Steel's handler
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
 
-  console.log(`${MODULE_ID}: ✓✓✓ STATUS BUTTON CLICKED ✓✓✓`);
-
-  // Find message
-  const messageEl = statusBtn.closest("[data-message-id]");
-  if (!messageEl) {
-    console.error(`${MODULE_ID}: No message element found`);
-    ui.notifications.error("Could not find message");
-    return;
-  }
-
-  const messageId = messageEl.dataset.messageId;
-  const message = game.messages.get(messageId);
-  if (!message) {
-    console.error(`${MODULE_ID}: Message not found: ${messageId}`);
-    ui.notifications.error("Message not found");
-    return;
-  }
-
-  console.log(`${MODULE_ID}: Found message: ${messageId}`);
-
-  // Extract status info
-  const statusId = statusBtn.dataset.effectId;
-  const statusName = statusBtn.textContent.trim();
-  const effectUuid = statusBtn.dataset.uuid;
-
-  console.log(`${MODULE_ID}: Status extracted:`, { statusName, statusId, effectUuid });
-
-  // Get targets
-  const targets = Array.from(game.user.targets);
-  console.log(`${MODULE_ID}: Targets:`, targets.map(t => t.name));
-
-  if (!targets.length) {
-    ui.notifications.warn("Select a target first");
-    return;
-  }
-
-  // Get ability data
-  const abilityData = await extractAbilityDataFromMessage(message);
-  console.log(`${MODULE_ID}: Ability data:`, abilityData);
-
-  if (!abilityData) {
-    ui.notifications.warn("Could not extract ability");
-    return;
-  }
-
-  // Check socket
-  if (!socket) {
-    console.error(`${MODULE_ID}: Socket not available`);
-    ui.notifications.error("Socket not available");
-    return;
-  }
-
-  // Apply to each target
-  for (const target of targets) {
-    console.log(`${MODULE_ID}: Sending ${statusName} to ${target.name}...`);
+    console.log(`${MODULE_ID}: ✅ STATUS BUTTON INTERCEPTED:`, statusBtn.textContent.trim());
 
     try {
-      const result = await socket.executeAsGM("applyStatusToTarget", {
-        tokenId: target.id,
-        statusName,
-        statusId,
-        statusUuid: effectUuid,
-        sourceActorId: abilityData.sourceActorId,
-        sourceItemId: abilityData.itemId,
-        sourceItemName: abilityData.itemName,
-        sourcePlayerName: game.user.name,
-        ability: abilityData.ability,
-        timestamp: Date.now()
-      });
+      // Get the chat message
+      const messageEl = statusBtn.closest("[data-message-id]");
+      if (!messageEl) throw new Error("No message element");
 
-      if (result.success) {
-        console.log(`${MODULE_ID}: ✓ Applied ${statusName} to ${target.name}`);
-        ui.notifications.info(`Applied ${statusName} to ${target.name}`);
-      } else {
-        console.error(`${MODULE_ID}: Socket error:`, result.error);
-        ui.notifications.error(`Failed: ${result.error}`);
+      const messageId = messageEl.dataset.messageId;
+      const message = game.messages.get(messageId);
+      if (!message) throw new Error("Message not found: " + messageId);
+
+      // Extract status from button
+      const statusId = statusBtn.dataset.effectId;
+      const statusName = statusBtn.textContent.trim();
+      const effectUuid = statusBtn.dataset.uuid;
+
+      console.log(`${MODULE_ID}: Status details:`, { statusName, statusId });
+
+      // Get targets (CRITICAL: not owned token)
+      const targets = Array.from(game.user.targets);
+      if (!targets.length) {
+        ui.notifications.warn("Select a target to apply status");
+        return;
       }
-    } catch (err) {
-      console.error(`${MODULE_ID}: Exception:`, err);
-      ui.notifications.error(`Error: ${err.message}`);
-    }
-  }
 
-}, { capture: true });
+      console.log(`${MODULE_ID}: Targets:`, targets.map(t => t.name));
+
+      // Get ability data
+      const abilityData = await extractAbilityDataFromMessage(message);
+      if (!abilityData) {
+        console.warn(`${MODULE_ID}: No ability data extracted`);
+        ui.notifications.warn("Could not extract ability");
+        return;
+      }
+
+      // Verify socket available
+      if (!socket) {
+        console.error(`${MODULE_ID}: Socket not available`);
+        ui.notifications.error("Socket not available");
+        return;
+      }
+
+      // Apply status to each target via socket
+      for (const target of targets) {
+        console.log(`${MODULE_ID}: Applying ${statusName} to ${target.name}...`);
+
+        const result = await socket.executeAsGM("applyStatusToTarget", {
+          tokenId: target.id,
+          statusName,
+          statusId,
+          statusUuid: effectUuid,
+          sourceActorId: abilityData.sourceActorId,
+          sourceItemId: abilityData.itemId,
+          sourceItemName: abilityData.itemName,
+          sourcePlayerName: game.user.name,
+          ability: abilityData.ability,
+          timestamp: Date.now()
+        });
+
+        if (result.success) {
+          console.log(`${MODULE_ID}: ✅ ${statusName} applied to ${target.name}`);
+          ui.notifications.info(`Applied ${statusName} to ${target.name}`);
+        } else {
+          console.error(`${MODULE_ID}: Failed to apply ${statusName}:`, result.error);
+          ui.notifications.error(`Failed: ${result.error}`);
+        }
+      }
+
+    } catch (error) {
+      console.error(`${MODULE_ID}: Status button handler error:`, error);
+      ui.notifications.error(`Error: ${error.message}`);
+    }
+
+  }, { capture: true }); // Capture phase intercepts FIRST
+
+  console.log(`${MODULE_ID}: Status button event delegation ready`);
+});
 
 // Handle status undo button clicks in chat (keep existing undo logic)
 Hooks.on('renderChatMessageHTML', (message, html) => {
