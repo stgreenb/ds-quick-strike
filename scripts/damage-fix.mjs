@@ -1052,170 +1052,107 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
   });
 });
 
-// Hook status button clicks in chat (Draw Steel status application buttons)
-Hooks.on('renderChatMessageHTML', (message, html) => {
-  console.log(`${MODULE_ID}: ===== PROCESSING CHAT MESSAGE =====`);
-  console.log(`${MODULE_ID}: Message ID: ${message.id}`);
-  console.log(`${MODULE_ID}: Message content preview: ${message.content?.substring(0, 100)}...`);
-  console.log(`${MODULE_ID}: Message flavor: ${message.flavor}`);
+// =========================================================================
+// EVENT DELEGATION: Intercept status button clicks BEFORE Draw Steel
+// =========================================================================
+document.addEventListener("click", (event) => {
+  const statusBtn = event.target.closest('button[data-type="status"]');
+  if (!statusBtn) return;
 
-  if (!(html instanceof HTMLElement)) {
-    console.warn(`${MODULE_ID}: html is not an HTMLElement, skipping status handler`);
-    return;
-  }
+  // **CRITICAL: Stop Draw Steel's handler from running**
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
 
-  // DEBUG: Log ALL buttons in the message to see what we're working with
-  const allButtons = html.querySelectorAll('button');
-  console.log(`${MODULE_ID}: Found ${allButtons.length} total buttons in message`);
+  console.log(`${MODULE_ID}: ✓ Intercepted status button before Draw Steel handler`);
 
-  if (allButtons.length > 0) {
-    allButtons.forEach((btn, index) => {
-      const dataset = {...btn.dataset};
-      console.log(`${MODULE_ID}: Button ${index}:`, {
-        text: btn.textContent.trim(),
-        dataset: dataset,
-        className: btn.className
-      });
-    });
-  }
-
-  // Find all status application buttons (data-type="status" from Draw Steel)
-  const statusButtons = html.querySelectorAll('button[data-type="status"]');
-  console.log(`${MODULE_ID}: Status selector: button[data-type="status"]`);
-  console.log(`${MODULE_ID}: Found ${statusButtons.length} status buttons in message`);
-
-  if (statusButtons.length > 0) {
-    console.log(`${MODULE_ID}: ✅ Status buttons detected - attaching handlers`);
-    statusButtons.forEach((btn, index) => {
-      console.log(`${MODULE_ID}: Status button ${index} details:`, {
-        text: btn.textContent.trim(),
-        effectId: btn.dataset.effectId,
-        uuid: btn.dataset.uuid,
-        className: btn.className
-      });
-    });
-  } else {
-    // Try alternative selectors in case Draw Steel uses different attributes
-    const altButtons1 = html.querySelectorAll('button[data-effect-id]');
-    const altButtons2 = html.querySelectorAll('button[data-status]');
-    const altButtons3 = html.querySelectorAll('button[data-uuid]');
-
-    console.log(`${MODULE_ID}: No status buttons found with main selector`);
-    console.log(`${MODULE_ID}: Alternative selectors:`, {
-      'data-effect-id': altButtons1.length,
-      'data-status': altButtons2.length,
-      'data-uuid': altButtons3.length
-    });
-  }
-
-  statusButtons.forEach((btn, index) => {
-
-    btn.addEventListener('click', async (event) => {
-      event.preventDefault();
-      event.stopPropagation(); // CRITICAL: Stop Draw Steel's default handler
-
-      try {
-        console.log(`${MODULE_ID}: ===== STATUS BUTTON CLICKED =====`);
-
-        // Extract status info from button data attributes
-        const statusId = btn.dataset.effectId;           // e.g. "slowed"
-        const statusUuid = btn.dataset.uuid;             // Actor.xxx.Item.xxx.PowerRollEffect.xxx (if available)
-        const statusName = btn.textContent.trim();       // e.g. "Slowed"
-
-        console.log(`${MODULE_ID}: Status button clicked: ${statusName}`, { statusId, statusUuid });
-        console.log(`${MODULE_ID}: Button dataset:`, btn.dataset);
-
-        // Get currently selected targets (user must have them selected, just like damage)
-        const targets = Array.from(game.user.targets);
-        console.log(`${MODULE_ID}: Current targets:`, targets.map(t => `${t.name} (${t.id})`));
-
-        if (!targets.length) {
-          console.warn(`${MODULE_ID}: No targets selected`);
-          ui.notifications.warn("Select a target to apply status");
-          return;
-        }
-
-        console.log(`${MODULE_ID}: ===== STATUS APPLICATION INITIATED =====`);
-        console.log(`${MODULE_ID}: Status: ${statusName} (${statusId})`);
-        console.log(`${MODULE_ID}: UUID: ${statusUuid || 'NOT PROVIDED'}`);
-        console.log(`${MODULE_ID}: Targets: ${targets.length}`);
-        console.log(`${MODULE_ID}: Applying status ${statusName} to ${targets.length} target(s)`);
-
-        // Check if socket is available
-        if (!socket) {
-          console.error(`${MODULE_ID}: Socket not available, cannot apply status`);
-          console.error(`${MODULE_ID}: Socket state:`, socket);
-          ui.notifications.error("Socket not available");
-          return;
-        }
-        console.log(`${MODULE_ID}: Socket available, proceeding with status application`);
-
-        // Create minimal ability data for now
-        const abilityData = {
-          sourceActorId: game.user.character?.id || game.user.id,
-          itemId: null,
-          itemName: 'Status Effect',
-          ability: {
-            name: 'Status Effect',
-            img: 'icons/svg/status.svg',
-            system: {
-              effects: [{
-                name: statusName,
-                id: statusId
-              }]
-            }
-          }
-        };
-
-        console.log(`${MODULE_ID}: Using ability data:`, abilityData);
-
-        for (const target of targets) {
-          try {
-            console.log(`${MODULE_ID}: ----- APPLYING TO TARGET: ${target.name} -----`);
-            console.log(`${MODULE_ID}: Target ID: ${target.id}`);
-            console.log(`${MODULE_ID}: Target Actor ID: ${target.actor?.id}`);
-            console.log(`${MODULE_ID}: Target document:`, target);
-            console.log(`${MODULE_ID}: Target actor:`, target.actor);
-
-            const payload = {
-              tokenId: target.id,
-              statusName: statusName,
-              statusId: statusId,
-              statusUuid: statusUuid,
-              sourceActorId: abilityData.sourceActorId,
-              sourceItemId: abilityData.itemId,
-              sourceItemName: abilityData.itemName,
-              sourcePlayerName: game.user.name,
-              ability: abilityData.ability,
-              timestamp: Date.now()
-            };
-
-            console.log(`${MODULE_ID}: Socket payload:`, payload);
-            console.log(`${MODULE_ID}: Calling socket.executeAsGM('applyStatusToTarget', payload)`);
-
-            const result = await socket.executeAsGM('applyStatusToTarget', payload);
-
-            console.log(`${MODULE_ID}: Socket result for ${target.name}:`, result);
-
-            if (result.success) {
-              ui.notifications.info(`Applied ${statusName} to ${target.name}`);
-            } else {
-              console.error(`${MODULE_ID}: Failed to apply status:`, result.error);
-              ui.notifications.error(`Failed to apply ${statusName}: ${result.error}`);
-            }
-          } catch (error) {
-            console.error(`${MODULE_ID}: Socket error applying status to ${target.name}`, error);
-            ui.notifications.error(`Error applying ${statusName} to ${target.name}`);
-          }
-        }
-      } catch (error) {
-        console.error(`${MODULE_ID}: Error handling status button click`, error);
-        ui.notifications.error("Error applying status");
+  (async () => {
+    try {
+      // Find the message
+      const messageElement = statusBtn.closest("[data-message-id]");
+      if (!messageElement) {
+        console.warn(`${MODULE_ID}: Could not find message element`);
+        return;
       }
-    });
-  });
 
-  // Handle status undo button clicks in chat
+      const messageId = messageElement.dataset.messageId;
+      const message = game.messages.get(messageId);
+      if (!message) {
+        console.warn(`${MODULE_ID}: Message not found: ${messageId}`);
+        return;
+      }
+
+      // Extract status
+      const statusId = statusBtn.dataset.effectId;           // e.g., "slowed"
+      const effectUuid = statusBtn.dataset.uuid;             // Actor.xxx.Item.xxx.PowerRollEffect.xxx
+      const statusName = statusBtn.textContent.trim();
+
+      console.log(`${MODULE_ID}: Status details:`, { statusName, statusId, effectUuid });
+
+      // Get ability data
+      const abilityData = await extractAbilityDataFromMessage(message);
+      if (!abilityData) {
+        console.warn(`${MODULE_ID}: Could not extract ability data`);
+        ui.notifications.warn("Could not determine source ability");
+        return;
+      }
+
+      // **CRITICAL: Use game.user.targets NOT game.user.character**
+      const targets = Array.from(game.user.targets);
+      console.log(`${MODULE_ID}: Current targets:`, targets.map(t => `${t.name} (${t.id})`));
+
+      if (!targets.length) {
+        ui.notifications.warn("Select a target to apply status");
+        return;
+      }
+
+      if (!socket) {
+        console.error(`${MODULE_ID}: Socket not available`);
+        ui.notifications.error("Socket not available");
+        return;
+      }
+
+      // Send each target via socket to GM
+      for (const target of targets) {
+        try {
+          console.log(`${MODULE_ID}: Applying ${statusName} to ${target.name} via socket...`);
+
+          const result = await socket.executeAsGM("applyStatusToTarget", {
+            tokenId: target.id,
+            statusName: statusName,
+            statusId: statusId,
+            statusUuid: effectUuid,
+            sourceActorId: abilityData.sourceActorId,
+            sourceItemId: abilityData.itemId,
+            sourceItemName: abilityData.itemName,
+            sourcePlayerName: game.user.name,
+            ability: abilityData.ability,
+            timestamp: Date.now()
+          });
+
+          if (result.success) {
+            console.log(`${MODULE_ID}: ✓ Socket applied ${statusName} to ${target.name}`);
+            ui.notifications.info(`Applied ${statusName} to ${target.name}`);
+          } else {
+            console.error(`${MODULE_ID}: ✗ Socket failed: ${result.error}`);
+            ui.notifications.error(`Failed: ${result.error}`);
+          }
+        } catch (socketError) {
+          console.error(`${MODULE_ID}: Socket error for ${target.name}:`, socketError);
+          ui.notifications.error(`Error applying to ${target.name}`);
+        }
+      }
+
+    } catch (error) {
+      console.error(`${MODULE_ID}: Status button handler crashed:`, error);
+      ui.notifications.error("Error applying status");
+    }
+  })();
+
+}, { capture: true }); // Capture phase runs BEFORE default handlers
+
+// Handle status undo button clicks in chat (keep existing undo logic)
+Hooks.on('renderChatMessageHTML', (message, html) => {
   const statusUndoBtn = html.querySelector('.status-undo-btn');
   if (!statusUndoBtn) return;
 
