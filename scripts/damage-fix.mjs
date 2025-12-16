@@ -1059,11 +1059,37 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
     return;
   }
 
+  // DEBUG: Log ALL buttons in the message to see what we're working with
+  const allButtons = html.querySelectorAll('button');
+  if (allButtons.length > 0) {
+    console.log(`${MODULE_ID}: Found ${allButtons.length} total buttons in message`);
+    allButtons.forEach((btn, index) => {
+      const dataset = {...btn.dataset};
+      console.log(`${MODULE_ID}: Button ${index}:`, {
+        text: btn.textContent.trim(),
+        dataset: dataset,
+        className: btn.className
+      });
+    });
+  }
+
   // Find all status application buttons (data-type="status" from Draw Steel)
   const statusButtons = html.querySelectorAll('button[data-type="status"][data-effect-id]');
 
   if (statusButtons.length > 0) {
     console.log(`${MODULE_ID}: Found ${statusButtons.length} status buttons in message`);
+  } else {
+    // Try alternative selectors in case Draw Steel uses different attributes
+    const altButtons1 = html.querySelectorAll('button[data-effect-id]');
+    const altButtons2 = html.querySelectorAll('button[data-status]');
+    const altButtons3 = html.querySelectorAll('button[data-uuid]');
+
+    console.log(`${MODULE_ID}: No status buttons found with main selector`);
+    console.log(`${MODULE_ID}: Alternative selectors:`, {
+      'data-effect-id': altButtons1.length,
+      'data-status': altButtons2.length,
+      'data-uuid': altButtons3.length
+    });
   }
 
   statusButtons.forEach((btn, index) => {
