@@ -1074,7 +1074,7 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
   }
 
   // Find all status application buttons (data-type="status" from Draw Steel)
-  const statusButtons = html.querySelectorAll('button[data-type="status"][data-effect-id]');
+  const statusButtons = html.querySelectorAll('button[data-type="status"]');
 
   if (statusButtons.length > 0) {
     console.log(`${MODULE_ID}: Found ${statusButtons.length} status buttons in message`);
