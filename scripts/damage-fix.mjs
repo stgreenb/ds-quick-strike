@@ -14,6 +14,8 @@ Hooks.once('socketlib.ready', () => {
     socket.register('applyDamageToTarget', handleGMDamageApplication);
     socket.register('applyHealToTarget', handleGMHealApplication);
     socket.register('undoLastDamage', handleGMUndoDamage);
+    socket.register('applyStatusToTarget', handleGMApplyStatus);
+    socket.register('undoStatusApplication', handleGMUndoStatus);
     console.log(`${MODULE_ID}: SocketLib registered successfully`);
   } catch (error) {
     console.error(`${MODULE_ID}: Failed to register socketlib:`, error);
@@ -33,6 +35,15 @@ Hooks.once('ready', () => {
   game.settings.register(MODULE_ID, 'publicDamageLog', {
     name: 'Public Damage Log',
     hint: 'Post damage and healing to public chat (undo buttons remain private)',
+    scope: 'world',
+    config: true,
+    type: Boolean,
+    default: false
+  });
+
+  game.settings.register(MODULE_ID, 'publicStatusLog', {
+    name: 'Public Status Log',
+    hint: 'Post status applications to public chat (undo buttons remain GM-only)',
     scope: 'world',
     config: true,
     type: Boolean,
@@ -717,6 +728,142 @@ async function logDamageToChat(entry) {
 }
 
 /**
+ * Log status application to chat (public or private based on setting)
+ */
+async function logStatusToChat(entry) {
+  try {
+    console.log(`${MODULE_ID}: logStatusToChat called with:`, entry);
+
+    const icon = entry.type === 'apply' ? '✓' : '✗';
+    const sourceLabel = entry.source === 'socket' ? `via ${entry.sourcePlayerName}` : 'direct GM action';
+
+    // Private GM message with undo button
+    const privateContent = `
+      <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'apply' ? '#4CAF50' : '#f44336'};">
+        <div style="margin-bottom: 8px;">
+          <strong>${icon} ${entry.type === 'apply' ? 'STATUS APPLIED' : 'STATUS REMOVED'}</strong>
+          <span style="font-size: 0.8em; color: #aaa;">${sourceLabel}</span>
+        </div>
+        <div style="margin-bottom: 4px;">
+          <strong>${entry.statusName}</strong> applied to <strong>${entry.targetName}</strong>
+        </div>
+        <div style="margin-bottom: 4px;">
+          Source: ${entry.sourceActorName} (${entry.sourceItemName})
+        </div>
+        ${entry.type === 'apply' ? `
+          <div style="margin-top: 8px;">
+            <button class="status-undo-btn"
+              data-target-token="${entry.targetTokenId}"
+              data-target-actor="${entry.targetActorId}"
+              data-effect-id="${entry.effectId}"
+              data-status-name="${entry.statusName}"
+              data-event-id="${entry.eventId}"
+              style="background: #f44336; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-weight: bold; font-size: 0.9em;">
+              Undo
+            </button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    const isPublic = game.settings.get(MODULE_ID, 'publicStatusLog') ?? false;
+
+    let message;
+    if (isPublic) {
+      // Public message (no undo button, no whisper)
+      const publicContent = `
+        <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'apply' ? '#4CAF50' : '#f44336'};">
+          <div style="margin-bottom: 8px;">
+            <strong>${icon} ${entry.type === 'apply' ? 'STATUS APPLIED' : 'STATUS REMOVED'}</strong>
+          </div>
+          <div style="margin-bottom: 4px;">
+            <strong>${entry.statusName}</strong> → <strong>${entry.targetName}</strong>
+          </div>
+        </div>
+      `;
+
+      message = await ChatMessage.create({
+        content: publicContent,
+        whisper: [] // Broadcast to all
+      });
+
+      // Send undo button to GMs only
+      const gmUsers = game.users
+        .filter(u => u.isGM && u.active)
+        .map(u => u.id);
+
+      await ChatMessage.create({
+        content: privateContent,
+        whisper: gmUsers
+      });
+    } else {
+      // Private mode (only send to GMs with full content)
+      const gmUsers = game.users
+        .filter(u => u.isGM && u.active)
+        .map(u => u.id);
+
+      message = await ChatMessage.create({
+        content: privateContent,
+        whisper: gmUsers
+      });
+    }
+
+    // Store in history for potential tracking
+    damageHistory.push({
+      ...entry,
+      messageId: message.id,
+      timestamp: Date.now()
+    });
+
+    console.log(`${MODULE_ID}: Logged status to chat for ${entry.targetName}`);
+
+  } catch (error) {
+    console.error(`${MODULE_ID}: logStatusToChat ERROR`, error);
+  }
+}
+
+/**
+ * Extract ability data from a chat message for status application
+ */
+async function extractAbilityDataFromMessage(message) {
+  try {
+    // Try to get the source actor from the message author
+    let sourceActorId = null;
+    let sourceActor = null;
+
+    if (message.author?.character) {
+      sourceActor = message.author.character;
+      sourceActorId = sourceActor.id;
+    } else if (message.author?.isGM && game.user.character) {
+      sourceActor = game.user.character;
+      sourceActorId = sourceActor.id;
+    }
+
+    // For now, create a minimal ability data structure
+    // In a full implementation, this would parse the message content to extract
+    // the actual ability data that generated the status buttons
+    const abilityData = {
+      sourceActorId: sourceActorId,
+      itemId: null, // Would be extracted from message in full implementation
+      itemName: 'Unknown Ability', // Would be extracted from message
+      ability: {
+        name: 'Unknown Ability',
+        img: 'icons/svg/status.svg',
+        system: {
+          effects: [] // Would contain the effect definitions
+        }
+      }
+    };
+
+    console.log(`${MODULE_ID}: Extracted ability data:`, abilityData);
+    return abilityData;
+  } catch (error) {
+    console.error(`${MODULE_ID}: Error extracting ability data from message:`, error);
+    return null;
+  }
+}
+
+/**
  * Prepare hook payload with all required data for animation modules
  */
 async function prepareHookPayload(entry) {
@@ -903,6 +1050,112 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
   });
 });
 
+// Hook status button clicks in chat (Draw Steel status application buttons)
+Hooks.on('renderChatMessageHTML', (message, html) => {
+  if (!(html instanceof HTMLElement)) {
+    console.warn(`${MODULE_ID}: html is not an HTMLElement, skipping status handler`);
+    return;
+  }
+
+  // Find all status application buttons (data-type="status" from Draw Steel)
+  const statusButtons = html.querySelectorAll('button[data-type="status"][data-effect-id]');
+
+  statusButtons.forEach((btn) => {
+    btn.addEventListener('click', async (event) => {
+      event.preventDefault();
+
+      try {
+        // Extract status info from button data attributes
+        const statusId = btn.dataset.effectId;           // e.g. "slowed"
+        const statusUuid = btn.dataset.uuid;             // Actor.xxx.Item.xxx.PowerRollEffect.xxx
+        const statusName = btn.textContent.trim();       // e.g. "Slowed"
+
+        console.log(`${MODULE_ID}: Status button clicked: ${statusName}`, { statusId, statusUuid });
+
+        // Get the ability data from the message
+        const abilityData = await extractAbilityDataFromMessage(message);
+        if (!abilityData) {
+          console.warn(`${MODULE_ID}: Could not extract ability data from message`);
+          ui.notifications.warn("Could not determine source ability");
+          return;
+        }
+
+        // Get currently selected targets (user must have them selected, just like damage)
+        const targets = Array.from(game.user.targets);
+        if (!targets.length) {
+          ui.notifications.warn("Select a target to apply status");
+          return;
+        }
+
+        console.log(`${MODULE_ID}: Applying status ${statusName} to ${targets.length} target(s)`);
+
+        // Send via socket to GM for application
+        if (!socket) {
+          console.warn(`${MODULE_ID}: Socket not available, cannot apply status`);
+          ui.notifications.error("Socket not available");
+          return;
+        }
+
+        for (const target of targets) {
+          try {
+            const result = await socket.executeAsGM('applyStatusToTarget', {
+              tokenId: target.id,
+              statusName: statusName,
+              statusId: statusId,
+              statusUuid: statusUuid,
+              sourceActorId: abilityData.sourceActorId,
+              sourceItemId: abilityData.itemId,
+              sourceItemName: abilityData.itemName,
+              sourcePlayerName: game.user.name,
+              ability: abilityData.ability,
+              timestamp: Date.now()
+            });
+
+            if (result.success) {
+              ui.notifications.info(`Applied ${statusName} to ${target.name}`);
+            } else {
+              ui.notifications.error(`Failed to apply ${statusName}: ${result.error}`);
+            }
+          } catch (error) {
+            console.error(`${MODULE_ID}: Socket error applying status to ${target.name}`, error);
+            ui.notifications.error(`Error applying ${statusName} to ${target.name}`);
+          }
+        }
+      } catch (error) {
+        console.error(`${MODULE_ID}: Error handling status button click`, error);
+        ui.notifications.error("Error applying status");
+      }
+    });
+  });
+
+  // Handle status undo button clicks in chat
+  const statusUndoBtn = html.querySelector('.status-undo-btn');
+  if (!statusUndoBtn) return;
+
+  statusUndoBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+
+    const tokenId = statusUndoBtn.dataset.targetToken;
+    const actorId = statusUndoBtn.dataset.targetActor;
+    const effectId = statusUndoBtn.dataset.effectId;
+    const statusName = statusUndoBtn.dataset.statusName;
+    const eventId = statusUndoBtn.dataset.eventId ?? null;
+
+    if (!game.user.isGM) {
+      ui.notifications.error('Only GM can undo status');
+      return;
+    }
+
+    const result = await handleGMUndoStatus({ tokenId, actorId, effectId, statusName, eventId });
+
+    if (result.success) {
+      ui.notifications.info(`Undo successful - ${statusName} removed`);
+    } else {
+      ui.notifications.error(`Undo failed: ${result.error}`);
+    }
+  });
+});
+
 /**
  * GM handler: Undo damage/healing
  */
@@ -996,4 +1249,256 @@ async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, t
     console.error(`${MODULE_ID}: GM undo error:`, error);
     return { success: false, error: error.message };
   }
+}
+
+/**
+ * GM handler – Apply a status effect to a target based on ability effect definition
+ */
+async function handleGMApplyStatus({
+  tokenId,
+  statusName,
+  statusId = null,
+  statusUuid = null,
+  sourceActorId,
+  sourceItemId,
+  sourceItemName,
+  sourcePlayerName,
+  ability = null,
+  timestamp,
+  eventId = null
+}) {
+  if (!game.user.isGM) {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  try {
+    const token = canvas.tokens.get(tokenId);
+    if (!token) {
+      return { success: false, error: "Token not found" };
+    }
+
+    const actor = token.actor;
+    if (!actor) {
+      return { success: false, error: "Actor not found" };
+    }
+
+    console.log(`${MODULE_ID}: GM applying status "${statusName}" to ${actor.name}`);
+
+    // Build the Active Effect from the ability's effect definition
+    let effectData = buildActiveEffectFromAbility(ability, statusName, statusId, statusUuid, sourceActorId, sourceItemId);
+
+    if (!effectData) {
+      return { success: false, error: "Could not build effect data" };
+    }
+
+    // Create the Active Effect on the target actor
+    const created = await actor.createEmbeddedDocuments("ActiveEffect", [effectData]);
+
+    if (!created.length) {
+      return { success: false, error: "Failed to create effect" };
+    }
+
+    const effectId = created[0].id;
+    console.log(`${MODULE_ID}: Status effect created on ${actor.name}:`, effectId);
+
+    // Generate unique eventId if not provided
+    const generatedEventId = eventId || `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Log to chat
+    try {
+      await logStatusToChat({
+        type: "apply",
+        statusName: statusName,
+        statusId: statusId,
+        statusUuid: statusUuid,
+        targetName: actor.name,
+        targetTokenId: token.id,
+        targetActorId: actor.id,
+        sourceActorId: sourceActorId,
+        sourceActorName: game.actors.get(sourceActorId)?.name ?? "Unknown",
+        sourceItemId: sourceItemId,
+        sourceItemName: sourceItemName,
+        sourcePlayerName: sourcePlayerName,
+        source: "socket",
+        effectId: effectId,
+        eventId: generatedEventId,
+        timestamp: timestamp
+      });
+    } catch (logError) {
+      console.error(`${MODULE_ID}: Error logging status to chat`, logError);
+    }
+
+    // Fire hook for animation system
+    try {
+      Hooks.callAll("ds-quick-strikeStatusApplied", {
+        actorId: actor.id,
+        tokenId: token.id,
+        statusName: statusName,
+        statusId: statusId,
+        statusUuid: statusUuid,
+        effectId: effectId,
+        sourceActorId: sourceActorId,
+        sourceItemId: sourceItemId,
+        sourceItemName: sourceItemName,
+        sourcePlayerName: sourcePlayerName,
+        ability: ability,
+        eventId: generatedEventId,
+        timestamp: timestamp
+      });
+    } catch (hookError) {
+      console.error(`${MODULE_ID}: Error firing ds-quick-strikeStatusApplied hook`, hookError);
+    }
+
+    return { success: true, effectId: effectId, statusName: statusName };
+
+  } catch (error) {
+    console.error(`${MODULE_ID}: GM apply status error`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * GM handler – Undo a status effect application
+ */
+async function handleGMUndoStatus({
+  tokenId,
+  actorId,
+  effectId,
+  statusName,
+  eventId = null
+}) {
+  if (!game.user.isGM) {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  try {
+    const token = tokenId ? canvas.tokens.get(tokenId) : null;
+    const actor = actorId ? game.actors.get(actorId) : token?.actor;
+
+    if (!actor) {
+      return { success: false, error: "Actor not found" };
+    }
+
+    console.log(`${MODULE_ID}: GM undoing status "${statusName}" on ${actor.name}`);
+
+    // Delete the effect
+    const effect = actor.effects.get(effectId);
+    if (!effect) {
+      return { success: false, error: "Effect not found" };
+    }
+
+    await effect.delete();
+
+    // Log undo to chat
+    const undoTime = new Date().toLocaleTimeString();
+    const undoMessage = `
+      <div style="font-family: monospace; padding: 8px; border-left: 3px solid #2196F3; opacity: 0.7;">
+        <div style="margin-bottom: 4px;">
+          <strong>↶ UNDO</strong> <span style="font-size: 0.8em; color: #666;">${undoTime}</span>
+        </div>
+        <div style="margin-bottom: 4px;">
+          <strong>${statusName}</strong> removed from <strong>${actor.name}</strong>
+        </div>
+      </div>
+    `;
+
+    const gmUsers = game.users
+      .filter(u => u.isGM && u.active)
+      .map(u => u.id);
+
+    await ChatMessage.create({
+      content: undoMessage,
+      whisper: gmUsers
+    });
+
+    // Fire undo hook for animation system
+    try {
+      Hooks.callAll("ds-quick-strikeStatusUndone", {
+        actorId: actor.id,
+        tokenId: token?.id ?? null,
+        statusName: statusName,
+        effectId: effectId,
+        eventId: eventId,
+        timestamp: Date.now()
+      });
+    } catch (hookError) {
+      console.error(`${MODULE_ID}: Error firing ds-quick-strikeStatusUndone hook`, hookError);
+    }
+
+    return { success: true };
+
+  } catch (error) {
+    console.error(`${MODULE_ID}: GM undo status error`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Build Active Effect from ability data
+ */
+function buildActiveEffectFromAbility(
+  ability,
+  statusName,
+  statusId,
+  statusUuid = null,
+  sourceActorId,
+  sourceItemId
+) {
+  if (!ability) {
+    console.warn(`${MODULE_ID}: No ability provided to build effect`);
+    return null;
+  }
+
+  // Find the effect in the ability's effects array that matches the status name or ID
+  const effectDef = ability.system?.effects?.find(e =>
+    e.name === statusName || e.id === statusId
+  );
+
+  if (!effectDef) {
+    console.warn(`${MODULE_ID}: Effect "${statusName}" not found in ability`, ability.name);
+    return null;
+  }
+
+  console.log(`${MODULE_ID}: Building effect from definition`, { statusName, statusId, effectDef });
+
+  // Determine duration from the effect (Draw Steel uses "save ends" etc.)
+  let duration = { rounds: 1, startRound: 0, startTurn: 0 };
+
+  // TODO: Parse Draw Steel effect tier structure to determine correct duration
+  // For now, assume single round or use the ability's documented duration
+
+  // Build the Active Effect document
+  const effectData = {
+    name: statusName,
+    icon: ability.img || "icons/svg/status.svg",
+    origin: `Actor.${sourceActorId}.Item.${sourceItemId}`,
+    duration: duration,
+    disabled: false,
+
+    // Use Draw Steel flags for enricher support
+    flags: {
+      ds: {
+        statusName: statusName,
+        statusId: statusId,
+        statusUuid: statusUuid, // Store the original UUID
+        sourceItemId: sourceItemId,
+        sourceItemName: ability.name,
+        // Store the enricher reference so it renders properly in tooltips
+        enrich: `@ds/status[${statusName.toLowerCase().replace(/ /g, "-")}]`
+      }
+    },
+
+    // You can add changes array if you want to modify actor stats
+    // For statuses like "Slowed", you might reduce action economy:
+    changes: [
+      // Example: slowed reduces actions per turn
+      // {
+      //   key: "system.combat.actions",
+      //   mode: CONST.ACTIVE_EFFECT_MODES.MULTIPLY,
+      //   value: 0.5
+      // }
+    ]
+  };
+
+  return effectData;
 }
