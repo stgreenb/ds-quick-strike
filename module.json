@@ -15,7 +15,7 @@
   },
   "url": "https://github.com/stgreenb/ds-quick-strike",
   "manifest": "https://raw.githubusercontent.com/stgreenb/ds-quick-strike/develop/module.json",
-  "download": "https://github.com/stgreenb/ds-quick-strike/archive/refs/heads/develop.zip",
+  "download": "https://raw.githubusercontent.com/stgreenb/ds-quick-strike/develop/ds-quick-strike-develop-v1.6.6.zip",
   "socket": true,
   "relationships": {
     "requires": [
