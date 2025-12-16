@@ -1130,6 +1130,13 @@ Hooks.once("ready", () => {
           timestamp: Date.now()
         });
 
+        // Better error handling for socket result
+        if (!result) {
+          console.error(`${MODULE_ID}: Socket returned no result`);
+          ui.notifications.error("Socket error - no response");
+          continue;
+        }
+
         if (result.success) {
           console.log(`${MODULE_ID}: ✅ ${statusName} applied to ${target.name}`);
           ui.notifications.info(`Applied ${statusName} to ${target.name}`);
@@ -1517,12 +1524,14 @@ function buildActiveEffectFromAbility(
     ability
   });
 
-  if (!ability) {
-    console.log(`${MODULE_ID}: No ability provided, creating minimal effect for ${statusName}`);
+  if (!ability || !ability.system?.effects) {
+    console.warn(`${MODULE_ID}: No valid ability or effect data provided, creating minimal effect for ${statusName}`);
+    console.log(`${MODULE_ID}: Ability provided:`, !!ability);
+    console.log(`${MODULE_ID}: Ability.system.effects:`, ability?.system?.effects?.length || 0);
     // Create a minimal effect structure for testing
     const minimalEffect = {
       name: statusName,
-      icon: "icons/svg/status.svg",
+      icon: ability?.img || "icons/svg/status.svg",
       origin: `Actor.${sourceActorId}.Item.${sourceItemId}`,
       duration: { rounds: 1, startRound: 0, startTurn: 0 },
       disabled: false,
