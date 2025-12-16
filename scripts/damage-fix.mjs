@@ -1118,14 +1118,20 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
           return;
         }
 
+        console.log(`${MODULE_ID}: ===== STATUS APPLICATION INITIATED =====`);
+        console.log(`${MODULE_ID}: Status: ${statusName} (${statusId})`);
+        console.log(`${MODULE_ID}: UUID: ${statusUuid || 'NOT PROVIDED'}`);
+        console.log(`${MODULE_ID}: Targets: ${targets.length}`);
         console.log(`${MODULE_ID}: Applying status ${statusName} to ${targets.length} target(s)`);
 
         // Check if socket is available
         if (!socket) {
           console.error(`${MODULE_ID}: Socket not available, cannot apply status`);
+          console.error(`${MODULE_ID}: Socket state:`, socket);
           ui.notifications.error("Socket not available");
           return;
         }
+        console.log(`${MODULE_ID}: Socket available, proceeding with status application`);
 
         // Create minimal ability data for now
         const abilityData = {
@@ -1148,9 +1154,13 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 
         for (const target of targets) {
           try {
-            console.log(`${MODULE_ID}: Applying to target: ${target.name} (${target.id})`);
+            console.log(`${MODULE_ID}: ----- APPLYING TO TARGET: ${target.name} -----`);
+            console.log(`${MODULE_ID}: Target ID: ${target.id}`);
+            console.log(`${MODULE_ID}: Target Actor ID: ${target.actor?.id}`);
+            console.log(`${MODULE_ID}: Target document:`, target);
+            console.log(`${MODULE_ID}: Target actor:`, target.actor);
 
-            const result = await socket.executeAsGM('applyStatusToTarget', {
+            const payload = {
               tokenId: target.id,
               statusName: statusName,
               statusId: statusId,
@@ -1161,7 +1171,12 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
               sourcePlayerName: game.user.name,
               ability: abilityData.ability,
               timestamp: Date.now()
-            });
+            };
+
+            console.log(`${MODULE_ID}: Socket payload:`, payload);
+            console.log(`${MODULE_ID}: Calling socket.executeAsGM('applyStatusToTarget', payload)`);
+
+            const result = await socket.executeAsGM('applyStatusToTarget', payload);
 
             console.log(`${MODULE_ID}: Socket result for ${target.name}:`, result);
 
@@ -1322,43 +1337,73 @@ async function handleGMApplyStatus({
   timestamp,
   eventId = null
 }) {
+  console.log(`${MODULE_ID}: ===== GM STATUS APPLICATION HANDLER =====`);
   console.log(`${MODULE_ID}: GM applying status "${statusName}" to token ${tokenId}`);
+  console.log(`${MODULE_ID}: Full parameters:`, {
+    tokenId,
+    statusName,
+    statusId,
+    statusUuid,
+    sourceActorId,
+    sourceItemId,
+    sourceItemName,
+    sourcePlayerName,
+    ability,
+    timestamp,
+    eventId
+  });
 
   if (!game.user.isGM) {
     console.error(`${MODULE_ID}: Not authorized - user is not GM`);
+    console.error(`${MODULE_ID}: Current user:`, game.user);
     return { success: false, error: "Unauthorized" };
   }
+  console.log(`${MODULE_ID}: GM authorization confirmed`);
 
   try {
+    console.log(`${MODULE_ID}: Looking up token ${tokenId} on canvas...`);
     const token = canvas.tokens.get(tokenId);
     if (!token) {
       console.error(`${MODULE_ID}: Token not found: ${tokenId}`);
+      console.error(`${MODULE_ID}: Available tokens:`, canvas.tokens.map(t => `${t.name} (${t.id})`));
       return { success: false, error: "Token not found" };
     }
+    console.log(`${MODULE_ID}: Found token: ${token.name}`);
 
     const actor = token.actor;
     if (!actor) {
       console.error(`${MODULE_ID}: Actor not found for token: ${tokenId}`);
+      console.error(`${MODULE_ID}: Token document:`, token.document);
       return { success: false, error: "Actor not found" };
     }
+    console.log(`${MODULE_ID}: Found actor: ${actor.name} (${actor.id})`);
+    console.log(`${MODULE_ID}: Actor type: ${actor.type}`);
+    console.log(`${MODULE_ID}: Current active effects:`, actor.effects.map(e => `${e.name} (${e.id})`));
 
     console.log(`${MODULE_ID}: Applying status "${statusName}" to ${actor.name}`);
 
     // Build the Active Effect from the ability's effect definition
+    console.log(`${MODULE_ID}: Building effect from ability...`);
     let effectData = buildActiveEffectFromAbility(ability, statusName, statusId, statusUuid, sourceActorId, sourceItemId);
 
     if (!effectData) {
+      console.error(`${MODULE_ID}: Failed to build effect data from ability:`, ability);
       return { success: false, error: "Could not build effect data" };
     }
+    console.log(`${MODULE_ID}: Built effect data:`, effectData);
 
     // Create the Active Effect on the target actor
+    console.log(`${MODULE_ID}: Creating Active Effect on actor...`);
     const created = await actor.createEmbeddedDocuments("ActiveEffect", [effectData]);
 
     if (!created.length) {
+      console.error(`${MODULE_ID}: No effects created, creation failed`);
       return { success: false, error: "Failed to create effect" };
     }
 
     const effectId = created[0].id;
+    console.log(`${MODULE_ID}: Successfully created effect with ID: ${effectId}`);
+    console.log(`${MODULE_ID}: Created effect:`, created[0]);
     console.log(`${MODULE_ID}: Status effect created on ${actor.name}:`, effectId);
 
     // Generate unique eventId if not provided
@@ -1389,22 +1434,28 @@ async function handleGMApplyStatus({
     }
 
     // Fire hook for animation system
+    console.log(`${MODULE_ID}: ===== FIRING STATUS APPLIED HOOK =====`);
+    const hookPayload = {
+      actorId: actor.id,
+      tokenId: token.id,
+      statusName: statusName,
+      statusId: statusId,
+      statusUuid: statusUuid,
+      effectId: effectId,
+      sourceActorId: sourceActorId,
+      sourceItemId: sourceItemId,
+      sourceItemName: sourceItemName,
+      sourcePlayerName: sourcePlayerName,
+      ability: ability,
+      eventId: generatedEventId,
+      timestamp: timestamp
+    };
+    console.log(`${MODULE_ID}: Hook payload:`, hookPayload);
+    console.log(`${MODULE_ID}: Firing ds-quick-strikeStatusApplied hook...`);
+
     try {
-      Hooks.callAll("ds-quick-strikeStatusApplied", {
-        actorId: actor.id,
-        tokenId: token.id,
-        statusName: statusName,
-        statusId: statusId,
-        statusUuid: statusUuid,
-        effectId: effectId,
-        sourceActorId: sourceActorId,
-        sourceItemId: sourceItemId,
-        sourceItemName: sourceItemName,
-        sourcePlayerName: sourcePlayerName,
-        ability: ability,
-        eventId: generatedEventId,
-        timestamp: timestamp
-      });
+      Hooks.callAll("ds-quick-strikeStatusApplied", hookPayload);
+      console.log(`${MODULE_ID}: Hook fired successfully`);
     } catch (hookError) {
       console.error(`${MODULE_ID}: Error firing ds-quick-strikeStatusApplied hook`, hookError);
     }
@@ -1504,6 +1555,16 @@ function buildActiveEffectFromAbility(
   sourceActorId,
   sourceItemId
 ) {
+  console.log(`${MODULE_ID}: ===== BUILDING ACTIVE EFFECT =====`);
+  console.log(`${MODULE_ID}: Parameters:`, {
+    statusName,
+    statusId,
+    statusUuid,
+    sourceActorId,
+    sourceItemId,
+    ability
+  });
+
   if (!ability) {
     console.log(`${MODULE_ID}: No ability provided, creating minimal effect for ${statusName}`);
     // Create a minimal effect structure for testing
@@ -1530,12 +1591,18 @@ function buildActiveEffectFromAbility(
   }
 
   // Find the effect in the ability's effects array that matches the status name or ID
+  console.log(`${MODULE_ID}: Searching for effect definition in ability...`);
+  console.log(`${MODULE_ID}: Ability effects array:`, ability.system?.effects);
+
   const effectDef = ability.system?.effects?.find(e =>
     e.name === statusName || e.id === statusId
   );
 
+  console.log(`${MODULE_ID}: Found effect definition:`, effectDef);
+
   if (!effectDef) {
     console.log(`${MODULE_ID}: Effect "${statusName}" not found in ability, creating minimal effect`);
+    console.log(`${MODULE_ID}: Tried to match by name "${statusName}" or ID "${statusId}"`);
     // Create a minimal effect structure for testing
     const minimalEffect = {
       name: statusName,
