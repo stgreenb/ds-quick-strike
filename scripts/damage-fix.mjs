@@ -54,17 +54,19 @@ Hooks.once('ready', () => {
     hookIntoActorDamage();
   }
 
-  const waitForDrawSteel = () => {
-    if (!globalThis.ds?.rolls?.DamageRoll) {
-      setTimeout(waitForDrawSteel, 100);
+  const waitForDependencies = () => {
+    // Wait for both Draw Steel AND SocketLib to be ready
+    if (!globalThis.ds?.rolls?.DamageRoll || !socket) {
+      setTimeout(waitForDependencies, 100);
       return;
     }
 
-    console.log(`${MODULE_ID}: Found Draw Steel, installing override`);
+    console.log(`${MODULE_ID}: Found Draw Steel and SocketLib, installing override`);
+    console.log(`${MODULE_ID}: Socket available: ${!!socket}`);
     installDamageOverride();
   };
 
-  waitForDrawSteel();
+  waitForDependencies();
 });
 
 /**
@@ -1057,19 +1059,14 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
     return;
   }
 
-  console.log(`${MODULE_ID}: Processing chat message for status buttons...`);
-
   // Find all status application buttons (data-type="status" from Draw Steel)
   const statusButtons = html.querySelectorAll('button[data-type="status"][data-effect-id]');
-  console.log(`${MODULE_ID}: Found ${statusButtons.length} status buttons in message`);
+
+  if (statusButtons.length > 0) {
+    console.log(`${MODULE_ID}: Found ${statusButtons.length} status buttons in message`);
+  }
 
   statusButtons.forEach((btn, index) => {
-    console.log(`${MODULE_ID}: Status button ${index}:`, {
-      text: btn.textContent.trim(),
-      effectId: btn.dataset.effectId,
-      uuid: btn.dataset.uuid,
-      type: btn.dataset.type
-    });
 
     btn.addEventListener('click', async (event) => {
       event.preventDefault();
@@ -1298,18 +1295,7 @@ async function handleGMApplyStatus({
   timestamp,
   eventId = null
 }) {
-  console.log(`${MODULE_ID}: ===== GM APPLY STATUS CALLED =====`);
-  console.log(`${MODULE_ID}: GM Status Request:`, {
-    tokenId,
-    statusName,
-    statusId,
-    statusUuid,
-    sourceActorId,
-    sourceItemId,
-    sourceItemName,
-    sourcePlayerName,
-    isGM: game.user?.isGM
-  });
+  console.log(`${MODULE_ID}: GM applying status "${statusName}" to token ${tokenId}`);
 
   if (!game.user.isGM) {
     console.error(`${MODULE_ID}: Not authorized - user is not GM`);
@@ -1318,22 +1304,18 @@ async function handleGMApplyStatus({
 
   try {
     const token = canvas.tokens.get(tokenId);
-    console.log(`${MODULE_ID}: Found token:`, token ? `${token.name} (${token.id})` : 'null');
-
     if (!token) {
       console.error(`${MODULE_ID}: Token not found: ${tokenId}`);
       return { success: false, error: "Token not found" };
     }
 
     const actor = token.actor;
-    console.log(`${MODULE_ID}: Found actor:`, actor ? `${actor.name} (${actor.id})` : 'null');
-
     if (!actor) {
       console.error(`${MODULE_ID}: Actor not found for token: ${tokenId}`);
       return { success: false, error: "Actor not found" };
     }
 
-    console.log(`${MODULE_ID}: GM applying status "${statusName}" to ${actor.name}`);
+    console.log(`${MODULE_ID}: Applying status "${statusName}" to ${actor.name}`);
 
     // Build the Active Effect from the ability's effect definition
     let effectData = buildActiveEffectFromAbility(ability, statusName, statusId, statusUuid, sourceActorId, sourceItemId);
@@ -1495,18 +1477,8 @@ function buildActiveEffectFromAbility(
   sourceActorId,
   sourceItemId
 ) {
-  console.log(`${MODULE_ID}: ===== BUILDING ACTIVE EFFECT =====`);
-  console.log(`${MODULE_ID}: Input data:`, {
-    ability: ability ? 'present' : 'null',
-    statusName,
-    statusId,
-    statusUuid,
-    sourceActorId,
-    sourceItemId
-  });
-
   if (!ability) {
-    console.warn(`${MODULE_ID}: No ability provided to build effect`);
+    console.log(`${MODULE_ID}: No ability provided, creating minimal effect for ${statusName}`);
     // Create a minimal effect structure for testing
     const minimalEffect = {
       name: statusName,
@@ -1527,7 +1499,6 @@ function buildActiveEffectFromAbility(
       changes: []
     };
 
-    console.log(`${MODULE_ID}: Using minimal effect structure:`, minimalEffect);
     return minimalEffect;
   }
 
@@ -1536,11 +1507,8 @@ function buildActiveEffectFromAbility(
     e.name === statusName || e.id === statusId
   );
 
-  console.log(`${MODULE_ID}: Ability effects:`, ability.system?.effects);
-  console.log(`${MODULE_ID}: Found effect definition:`, effectDef);
-
   if (!effectDef) {
-    console.warn(`${MODULE_ID}: Effect "${statusName}" not found in ability`, ability.name);
+    console.log(`${MODULE_ID}: Effect "${statusName}" not found in ability, creating minimal effect`);
     // Create a minimal effect structure for testing
     const minimalEffect = {
       name: statusName,
@@ -1561,11 +1529,10 @@ function buildActiveEffectFromAbility(
       changes: []
     };
 
-    console.log(`${MODULE_ID}: Using minimal effect structure (no effect found):`, minimalEffect);
     return minimalEffect;
   }
 
-  console.log(`${MODULE_ID}: Building effect from definition`, { statusName, statusId, effectDef });
+  console.log(`${MODULE_ID}: Building effect from definition for ${statusName}`);
 
   // Determine duration from the effect (Draw Steel uses "save ends" etc.)
   let duration = { rounds: 1, startRound: 0, startTurn: 0 };
