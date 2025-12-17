@@ -1,19 +1,11 @@
 const MODULE_ID = 'ds-quick-strike';
 
-// MINIMAL TEST HOOKS - Confirm file is loading correctly
-console.log("ds-quick-strike: file loaded vTEST");
-
-Hooks.once("ready", () => {
-  console.log("ds-quick-strike: ready TEST hook fired");
-});
-
 let socket;
 let damageHistory = [];
 const originalTakeDamageMap = new Map();
 
 /**
  * Initialize when SocketLib is ready
- * CRITICAL: Don't access game.user here - it's null during socketlib.ready!
  */
 Hooks.once('socketlib.ready', () => {
   try {
@@ -30,14 +22,9 @@ Hooks.once('socketlib.ready', () => {
 });
 
 /**
- * Setup damage override when ready
- * NOW game.user is available
+ * Setup when ready
  */
 Hooks.once('ready', () => {
-  console.log(`${MODULE_ID}: Ready hook fired`);
-  console.log(`${MODULE_ID}: User is GM: ${game.user.isGM}`);
-  console.log(`${MODULE_ID}: Socket available: ${!!socket}`);
-
   // Register module settings
   game.settings.register(MODULE_ID, 'publicDamageLog', {
     name: 'Public Damage Log',
@@ -62,14 +49,11 @@ Hooks.once('ready', () => {
   }
 
   const waitForDependencies = () => {
-    // Wait for both Draw Steel AND SocketLib to be ready
     if (!globalThis.ds?.rolls?.DamageRoll || !socket) {
       setTimeout(waitForDependencies, 100);
       return;
     }
 
-    console.log(`${MODULE_ID}: Found Draw Steel and SocketLib, installing override`);
-    console.log(`${MODULE_ID}: Socket available: ${!!socket}`);
     installDamageOverride();
   };
 
@@ -87,8 +71,6 @@ function hookIntoActorDamage() {
   game.actors.forEach(actor => {
     wrapActorTakeDamage(actor);
   });
-
-  console.log(`${MODULE_ID}: Actor damage hooks installed`);
 }
 
 /**
@@ -96,7 +78,7 @@ function hookIntoActorDamage() {
  */
 function wrapActorTakeDamage(actor) {
   if (!actor.system.takeDamage) return;
-  
+
   if (originalTakeDamageMap.has(actor.id)) return;
 
   const originalTakeDamage = actor.system.takeDamage.bind(actor.system);
@@ -114,16 +96,10 @@ function wrapActorTakeDamage(actor) {
     const isSocketCall = caller.includes('handleGMDamageApplication') ||
                          caller.includes('handleGMHealApplication');
 
-    // Extract optional sourceItemId for animation tracking
     const sourceItemId = options.sourceItemId || null;
-
-    // Generate unique eventId for damage-undo correlation
     const eventId = `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Get source actor ID (try character first, then user ID)
     const sourceActorId = game.user.character?.id || game.user.id;
 
-    // Log damage ONLY if NOT coming from socket (to avoid double-logging)
     if (!isSocketCall && amount > 0) {
       await logDamageToChat({
         type: 'damage',
@@ -145,8 +121,6 @@ function wrapActorTakeDamage(actor) {
 
     return result;
   };
-
-  console.log(`${MODULE_ID}: Wrapped takeDamage for ${actor.name}`);
 }
 
 /**
@@ -158,61 +132,31 @@ function installDamageOverride() {
 
   OriginalDamageRoll.applyDamageCallback = async function(event) {
     try {
-      console.log(`${MODULE_ID}: Damage button clicked`);
-
       const li = event.currentTarget.closest("[data-message-id]");
-      if (!li) {
-        console.warn(`${MODULE_ID}: Could not find message element`);
-        return;
-      }
+      if (!li) return;
 
       const message = game.messages.get(li.dataset.messageId);
-      if (!message) {
-        console.warn(`${MODULE_ID}: Could not find message`);
-        return;
-      }
+      if (!message) return;
 
       const rollIndex = event.currentTarget.dataset.index;
       const roll = message.rolls[rollIndex];
-      if (!roll) {
-        console.warn(`${MODULE_ID}: Could not find roll at index ${rollIndex}`);
-        return;
-      }
+      if (!roll) return;
 
       let amount = roll.total;
       if (event.shiftKey) {
         amount = Math.floor(amount / 2);
       }
 
-      console.log(`${MODULE_ID}: Damage amount: ${amount}`);
-
       const targets = Array.from(game.user.targets);
-      console.log(`${MODULE_ID}: User has ${targets.length} targets`, targets.map(t => t.name));
 
       // Check for self-damage and warn player
       const proceedWithDamage = await checkForSelfDamage(targets, amount, roll.isHeal, MODULE_ID);
-      if (!proceedWithDamage) {
-        return; // User cancelled self-damage
-      }
+      if (!proceedWithDamage) return;
 
       // Get source actor name and ID from message speaker
       let sourceActorName = 'Unknown Source';
       let sourceActorId = null;
-      let sourceItemName = 'Attack';  // Default to 'Attack' if no item found
-
-      // DEBUG: Log the entire message structure to find where ability name is
-      console.log(`${MODULE_ID}: DEBUG - Full message object:`, message);
-      console.log(`${MODULE_ID}: DEBUG - message.speaker:`, message.speaker);
-      console.log(`${MODULE_ID}: DEBUG - message.flags:`, message.flags);
-      console.log(`${MODULE_ID}: DEBUG - message.rolls[${rollIndex}]:`, message.rolls[rollIndex]);
-      console.log(`${MODULE_ID}: DEBUG - message.system:`, message.system);
-      console.log(`${MODULE_ID}: DEBUG - message.system keys:`, Object.keys(message.system || {}));
-      console.log(`${MODULE_ID}: DEBUG - message.flavor:`, message.flavor);
-      console.log(`${MODULE_ID}: DEBUG - message.data:`, message.data);
-      if (message.system?.ability) {
-        console.log(`${MODULE_ID}: DEBUG - message.system.ability:`, message.system.ability);
-        console.log(`${MODULE_ID}: DEBUG - ability keys:`, Object.keys(message.system.ability || {}));
-      }
+      let sourceItemName = 'Attack';
 
       if (message.speaker?.actor) {
         const sourceActor = game.actors.get(message.speaker.actor);
@@ -220,21 +164,16 @@ function installDamageOverride() {
           sourceActorName = sourceActor.name;
           sourceActorId = sourceActor.id;
 
-          // Try to get the actual ability/weapon name from the message
-          // The message speaker.item might contain the item being used
           if (message.speaker?.item) {
             const sourceItem = sourceActor.items.get(message.speaker.item);
             if (sourceItem) {
               sourceItemName = sourceItem.name;
-              console.log(`${MODULE_ID}: Found source item: ${sourceItemName}`);
             }
           } else if (message.system?.uuid) {
-            // Draw Steel stores ability UUID in message.system.uuid
             try {
               const sourceItem = await fromUuid(message.system.uuid);
               if (sourceItem) {
                 sourceItemName = sourceItem.name;
-                console.log(`${MODULE_ID}: Found source item from UUID: ${sourceItemName}`);
               }
             } catch (e) {
               console.warn(`${MODULE_ID}: Could not load item from UUID: ${message.system.uuid}`, e);
@@ -243,14 +182,10 @@ function installDamageOverride() {
         }
       }
 
-      console.log(`${MODULE_ID}: sourceActorName=${sourceActorName}, sourceItemName=${sourceItemName}`);
-
       // Always use socket handlers for consistent logging
       if (socket) {
-        console.log(`${MODULE_ID}: Redirecting to GM via socket (source: ${sourceActorName}, ability: ${sourceItemName})`);
         await applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName);
       } else {
-        console.log(`${MODULE_ID}: No socket available, using original damage application`);
         await originalCallback.call(this, event);
       }
     } catch (error) {
@@ -258,8 +193,6 @@ function installDamageOverride() {
       ui.notifications.error("Failed to apply damage");
     }
   };
-
-  console.log(`${MODULE_ID}: Override installed successfully`);
 }
 
 /**
@@ -267,15 +200,13 @@ function installDamageOverride() {
  */
 async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
   const playerCharacter = game.user.character;
-  if (!playerCharacter) return true; // No player character, continue
-  
+  if (!playerCharacter) return true;
+
   const selfDamageTargets = targets.filter(t => t.actor.id === playerCharacter.id);
-  
-  // Only warn on damage, not healing
+
   if (selfDamageTargets.length > 0 && !isHeal) {
     const targetName = selfDamageTargets[0].name;
-    console.log(`${moduleId}: Self-damage detected - ${targetName}, ${amount} damage`);
-    
+
     return new Promise(resolve => {
       const dialog = new Dialog({
         title: "⚠️ Self-Damage Warning",
@@ -290,15 +221,11 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
         buttons: {
           confirm: {
             label: "Confirm",
-            callback: () => {
-              console.log(`${moduleId}: Player confirmed self-damage`);
-              resolve(true);
-            }
+            callback: () => resolve(true)
           },
           cancel: {
             label: "Cancel",
             callback: () => {
-              console.log(`${moduleId}: Player cancelled self-damage`);
               ui.notifications.warn(`Damage to ${targetName} cancelled`);
               resolve(false);
             }
@@ -309,8 +236,8 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
       dialog.render(true);
     });
   }
-  
-  return true; // No self-damage, continue normally
+
+  return true;
 }
 
 /**
@@ -319,9 +246,6 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
 async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName) {
   try {
     for (const target of targets) {
-      console.log(`${MODULE_ID}: Sending damage request for ${target.name}`);
-
-      // Generate eventId for this damage application
       const eventId = `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
       if (roll.isHeal) {
@@ -375,7 +299,7 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sour
 function getStaminaSnapshot(actor) {
   const permanent = actor.system?.stamina?.value ?? 0;
   const temporary = actor.system?.stamina?.temporary ?? 0;
-  
+
   return { permanent, temporary };
 }
 
@@ -384,7 +308,6 @@ function getStaminaSnapshot(actor) {
  */
 function isHero(actor) {
   const type = actor.type || actor.system?.type;
-  console.log(`${MODULE_ID}: ${actor.name} type is '${type}'`);
   return type === 'character' || type === 'hero';
 }
 
@@ -394,15 +317,15 @@ function isHero(actor) {
 function applyStaminaBounds(actor, staminaSnapshot) {
   const max = actor.system?.stamina?.max || 0;
   const min = actor.system?.stamina?.min || 0;
-  
+
   let permanent = staminaSnapshot.permanent;
-  
+
   if (isHero(actor)) {
     permanent = Math.max(min, Math.min(max, permanent));
   } else {
     permanent = Math.max(0, Math.min(max, permanent));
   }
-  
+
   return {
     permanent,
     temporary: staminaSnapshot.temporary
@@ -420,18 +343,15 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
   try {
     const token = canvas.tokens.get(tokenId);
     if (!token) {
-      console.warn(`${MODULE_ID}: Token not found: ${tokenId}`);
       return { success: false, error: "Token not found" };
     }
 
     const actor = token.actor;
     if (!actor) {
-      console.warn(`${MODULE_ID}: Actor not found for token: ${tokenId}`);
       return { success: false, error: "Actor not found" };
     }
 
     const originalStamina = getStaminaSnapshot(actor);
-    console.log(`${MODULE_ID}: GM applying ${amount} damage to ${actor.name} (source: ${sourceActorName}, player: ${sourcePlayerName}). Pre-damage stamina: Perm=${originalStamina.permanent}, Temp=${originalStamina.temporary}. Is Hero: ${isHero(actor)}`);
 
     await actor.system.takeDamage(amount, {
       type: type,
@@ -443,36 +363,27 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
     newStamina = applyStaminaBounds(actor, newStamina);
 
     if (newStamina.permanent !== getStaminaSnapshot(actor).permanent) {
-      console.log(`${MODULE_ID}: Applying stamina bounds: ${getStaminaSnapshot(actor).permanent} → ${newStamina.permanent}`);
       await actor.update({'system.stamina.value': newStamina.permanent});
     }
 
-    console.log(`${MODULE_ID}: Post-damage stamina: Perm=${newStamina.permanent}, Temp=${newStamina.temporary}`);
-
-    console.log(`${MODULE_ID}: About to log damage to chat: ${actor.name} (Perm: ${originalStamina.permanent}→${newStamina.permanent}, Temp: ${originalStamina.temporary}→${newStamina.temporary})`);
-    try {
-      await logDamageToChat({
-        type: 'damage',
-        amount: amount,
-        damageType: type,
-        targetName: actor.name,
-        targetTokenId: token.id,
-        targetActorId: actor.id,
-        originalStamina: originalStamina,
-        newStamina: newStamina,
-        sourceActorId: sourceActorId || game.user.id, // Use actual source actor ID or fall back to GM user ID
-        sourceActorName: sourceActorName,
-        sourceItemName: sourceItemName,
-        sourcePlayerName: sourcePlayerName,
-        source: 'socket',
-        sourceItemId: sourceItemId,
-        eventId: eventId,
-        timestamp: Date.now()
-      });
-      console.log(`${MODULE_ID}: Successfully logged damage to chat`);
-    } catch (logError) {
-      console.error(`${MODULE_ID}: Error logging damage to chat:`, logError);
-    }
+    await logDamageToChat({
+      type: 'damage',
+      amount: amount,
+      damageType: type,
+      targetName: actor.name,
+      targetTokenId: token.id,
+      targetActorId: actor.id,
+      originalStamina: originalStamina,
+      newStamina: newStamina,
+      sourceActorId: sourceActorId || game.user.id,
+      sourceActorName: sourceActorName,
+      sourceItemName: sourceItemName,
+      sourcePlayerName: sourcePlayerName,
+      source: 'socket',
+      sourceItemId: sourceItemId,
+      eventId: eventId,
+      timestamp: Date.now()
+    });
 
     return {
       success: true,
@@ -505,7 +416,6 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
     }
 
     const originalStamina = getStaminaSnapshot(actor);
-    console.log(`${MODULE_ID}: GM applying ${amount} healing to ${actor.name} (source: ${sourceActorName}, player: ${sourcePlayerName}). Pre-heal stamina: Perm=${originalStamina.permanent}, Temp=${originalStamina.temporary}`);
 
     const isTemp = type !== "value";
     const currentTemp = actor.system.stamina?.temporary || 0;
@@ -522,38 +432,32 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
     );
 
     let newStamina = getStaminaSnapshot(actor);
-    
+
     const max = actor.system?.stamina?.max || 0;
     newStamina.permanent = Math.min(newStamina.permanent, max);
-    
+
     if (newStamina.permanent !== getStaminaSnapshot(actor).permanent) {
       await actor.update({'system.stamina.value': newStamina.permanent});
     }
-    
-    console.log(`${MODULE_ID}: Post-heal stamina: Perm=${newStamina.permanent}, Temp=${newStamina.temporary}`);
 
-    try {
-      await logDamageToChat({
-        type: "heal",
-        amount: amount,
-        damageType: type,
-        targetName: actor.name,
-        targetTokenId: token.id,
-        targetActorId: actor.id,
-        originalStamina: originalStamina,
-        newStamina: newStamina,
-        sourceActorId: sourceActorId || game.user.id, // Use actual source actor ID or fall back to GM user ID
-        sourceActorName: sourceActorName,
-        sourceItemName: sourceItemName,
-        sourcePlayerName: sourcePlayerName,
-        source: 'socket',
-        sourceItemId: sourceItemId,
-        eventId: eventId,
-        timestamp: Date.now()
-      });
-    } catch (logError) {
-      console.error(`${MODULE_ID}: Error logging heal to chat:`, logError);
-    }
+    await logDamageToChat({
+      type: "heal",
+      amount: amount,
+      damageType: type,
+      targetName: actor.name,
+      targetTokenId: token.id,
+      targetActorId: actor.id,
+      originalStamina: originalStamina,
+      newStamina: newStamina,
+      sourceActorId: sourceActorId || game.user.id,
+      sourceActorName: sourceActorName,
+      sourceItemName: sourceItemName,
+      sourcePlayerName: sourcePlayerName,
+      source: 'socket',
+      sourceItemId: sourceItemId,
+      eventId: eventId,
+      timestamp: Date.now()
+    });
 
     return {
       success: true,
@@ -571,8 +475,6 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
  */
 async function logDamageToChat(entry) {
   try {
-    console.log(`${MODULE_ID}: logDamageToChat called with:`, entry);
-
     const icon = entry.type === 'damage' ? '⚔️' : '✨';
     const sourceLabel = entry.source === 'socket' ? `(via ${entry.sourcePlayerName})` : '(direct GM action)';
 
@@ -582,12 +484,9 @@ async function logDamageToChat(entry) {
     }
 
     const isPublic = game.settings.get(MODULE_ID, 'publicDamageLog');
-    console.log(`${MODULE_ID}: Public damage log setting: ${isPublic}`);
 
-    // Extract source data and prepare hook payload
     const hookPayload = await prepareHookPayload(entry);
 
-    // Public message content (no undo button)
     const publicContent = `
       <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'damage' ? '#e76f51' : '#2a9d8f'};">
         <div style="margin-bottom: 8px;">
@@ -603,7 +502,6 @@ async function logDamageToChat(entry) {
       </div>
     `;
 
-    // Private GM message content (with undo button)
     const privateContent = `
       <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'damage' ? '#e76f51' : '#2a9d8f'};">
         <div style="margin-bottom: 8px;">
@@ -642,7 +540,6 @@ async function logDamageToChat(entry) {
       </div>
     `;
 
-    // Rich compact undo for public mode (GM only) - shows damage amount and stamina change
     const damageSymbol = entry.type === 'damage' ? '−' : '+';
     const undoColor = entry.type === 'damage' ? '#e76f51' : '#2a9d8f';
 
@@ -677,36 +574,25 @@ async function logDamageToChat(entry) {
 
     let message;
     if (isPublic) {
-      // Create public message first (no whisper = broadcast to all)
-      console.log(`${MODULE_ID}: Creating public chat message`);
       const publicMessage = await ChatMessage.create({
         content: publicContent,
-        whisper: [] // Empty array = broadcast to all players
+        whisper: []
       });
 
-      // Then create compact undo button (GM only)
       const gmUsers = game.users.filter(u => u.isGM && u.active).map(u => u.id);
-      console.log(`${MODULE_ID}: GM users to whisper to:`, gmUsers);
 
       message = await ChatMessage.create({
         content: compactUndoContent,
         whisper: gmUsers
       });
     } else {
-      // Private mode: only send to GMs with full content
       const gmUsers = game.users.filter(u => u.isGM && u.active).map(u => u.id);
-      console.log(`${MODULE_ID}: GM users to whisper to:`, gmUsers);
 
-      const messageData = {
+      message = await ChatMessage.create({
         content: privateContent,
         whisper: gmUsers
-      };
-
-      console.log(`${MODULE_ID}: Creating private chat message with data:`, messageData);
-      message = await ChatMessage.create(messageData);
+      });
     }
-
-    console.log(`${MODULE_ID}: Chat message created:`, message.id);
 
     await message.setFlag(MODULE_ID, 'damageEntry', {
       ...entry,
@@ -718,21 +604,16 @@ async function logDamageToChat(entry) {
       messageId: message.id
     });
 
-    // Fire animation hook after chat message is created
     if (hookPayload) {
       try {
         Hooks.callAll('ds-quick-strike:damageApplied', hookPayload);
-        console.log(`${MODULE_ID}: Fired ds-quick-strike:damageApplied hook with eventId: ${hookPayload.eventId}`);
       } catch (hookError) {
         console.error(`${MODULE_ID}: Error firing damageApplied hook:`, hookError);
-        // Continue without breaking the damage flow
       }
     }
 
-    console.log(`${MODULE_ID}: Logged to chat: ${entry.targetName} ${entry.type} (Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent}) from ${entry.sourceActorName}`);
   } catch (error) {
     console.error(`${MODULE_ID}: logDamageToChat ERROR:`, error);
-    console.error(`${MODULE_ID}: Stack trace:`, error.stack);
   }
 }
 
@@ -741,12 +622,9 @@ async function logDamageToChat(entry) {
  */
 async function logStatusToChat(entry) {
   try {
-    console.log(`${MODULE_ID}: logStatusToChat called with:`, entry);
-
     const icon = entry.type === 'apply' ? '✓' : '✗';
     const sourceLabel = entry.source === 'socket' ? `via ${entry.sourcePlayerName}` : 'direct GM action';
 
-    // Private GM message with undo button
     const privateContent = `
       <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'apply' ? '#4CAF50' : '#f44336'};">
         <div style="margin-bottom: 8px;">
@@ -759,6 +637,11 @@ async function logStatusToChat(entry) {
         <div style="margin-bottom: 4px;">
           Source: ${entry.sourceActorName} (${entry.sourceItemName})
         </div>
+        ${entry.duration ? `
+        <div style="margin-bottom: 4px; font-size: 0.9em; color: #666;">
+          Duration: ${entry.duration.label || entry.duration.text || 'Unknown'}
+        </div>
+        ` : ''}
         ${entry.type === 'apply' ? `
           <div style="margin-top: 8px;">
             <button class="status-undo-btn"
@@ -766,6 +649,7 @@ async function logStatusToChat(entry) {
               data-target-actor="${entry.targetActorId}"
               data-effect-id="${entry.effectId}"
               data-status-name="${entry.statusName}"
+              data-status-id="${entry.statusId}"
               data-event-id="${entry.eventId}"
               style="background: #f44336; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-weight: bold; font-size: 0.9em;">
               Undo
@@ -779,7 +663,6 @@ async function logStatusToChat(entry) {
 
     let message;
     if (isPublic) {
-      // Public message (no undo button, no whisper)
       const publicContent = `
         <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'apply' ? '#4CAF50' : '#f44336'};">
           <div style="margin-bottom: 8px;">
@@ -793,10 +676,9 @@ async function logStatusToChat(entry) {
 
       message = await ChatMessage.create({
         content: publicContent,
-        whisper: [] // Broadcast to all
+        whisper: []
       });
 
-      // Send undo button to GMs only
       const gmUsers = game.users
         .filter(u => u.isGM && u.active)
         .map(u => u.id);
@@ -806,7 +688,6 @@ async function logStatusToChat(entry) {
         whisper: gmUsers
       });
     } else {
-      // Private mode (only send to GMs with full content)
       const gmUsers = game.users
         .filter(u => u.isGM && u.active)
         .map(u => u.id);
@@ -817,14 +698,11 @@ async function logStatusToChat(entry) {
       });
     }
 
-    // Store in history for potential tracking
     damageHistory.push({
       ...entry,
       messageId: message.id,
       timestamp: Date.now()
     });
-
-    console.log(`${MODULE_ID}: Logged status to chat for ${entry.targetName}`);
 
   } catch (error) {
     console.error(`${MODULE_ID}: logStatusToChat ERROR`, error);
@@ -836,7 +714,6 @@ async function logStatusToChat(entry) {
  */
 async function extractAbilityDataFromMessage(message) {
   try {
-    // Try to get the source actor from the message author
     let sourceActorId = null;
     let sourceActor = null;
 
@@ -848,24 +725,114 @@ async function extractAbilityDataFromMessage(message) {
       sourceActorId = sourceActor.id;
     }
 
-    // For now, create a minimal ability data structure
-    // In a full implementation, this would parse the message content to extract
-    // the actual ability data that generated the status buttons
-    const abilityData = {
-      sourceActorId: sourceActorId,
-      itemId: null, // Would be extracted from message in full implementation
-      itemName: 'Unknown Ability', // Would be extracted from message
-      ability: {
-        name: 'Unknown Ability',
-        img: 'icons/svg/status.svg',
-        system: {
-          effects: [] // Would contain the effect definitions
+    // Extract ability name and duration from chat message content
+    let abilityName = 'Unknown Ability';
+    let durationInfo = null;
+    let sourcePlayerName = message.author?.name || 'Unknown';
+
+    // Get the message content element using multiple methods
+    let messageElement = ui.chat.collection.get(message.id)?.element;
+
+    // Fallback methods if the first one doesn't work
+    if (!messageElement) {
+      messageElement = document.querySelector(`[data-message-id="${message.id}"]`);
+    }
+
+    if (!messageElement) {
+      messageElement = message.element;
+    }
+
+    if (messageElement) {
+      // Look for ability name in the message
+      const abilityHeading = messageElement.querySelector('.message-content h5');
+      if (abilityHeading) {
+        abilityName = abilityHeading.textContent.trim();
+      } else {
+        const alternativeHeading = messageElement.querySelector('h3, h4, .ability-name, .item-name');
+        if (alternativeHeading) {
+          abilityName = alternativeHeading.textContent.trim();
         }
       }
+
+      // Look for duration information in all definition elements
+      const allDescriptions = messageElement.querySelectorAll('dd');
+
+      for (const dd of allDescriptions) {
+        const text = dd.textContent.trim();
+
+        if (text.includes('save ends')) {
+          // Use Draw Steel's structured duration format
+          durationInfo = {
+            type: 'draw-steel',
+            duration: null,
+            remaining: null,
+            label: 'Save Ends', // Draw Steel abbreviation for save ends
+            end: {
+              type: 'save',
+              roll: '1d10 + @combat.save.bonus'
+            }
+          };
+          break;
+        } else if (text.includes('end of turn') || text.includes('end of next turn')) {
+          // Use Draw Steel's structured duration format
+          durationInfo = {
+            type: 'draw-steel',
+            duration: null,
+            remaining: null,
+            label: 'EoT', // Draw Steel abbreviation for end of turn
+            end: {
+              type: 'turn',
+              roll: null
+            }
+          };
+          break;
+        } else if (text.includes('end of encounter') || text.includes('encounter')) {
+          // Use Draw Steel's structured duration format
+          durationInfo = {
+            type: 'draw-steel',
+            duration: null,
+            remaining: null,
+            label: 'EoE', // Draw Steel abbreviation for end of encounter
+            end: {
+              type: 'encounter',
+              roll: null
+            }
+          };
+          break;
+        } else if (text.includes('next respite') || text.includes('respite')) {
+          // Use Draw Steel's structured duration format
+          durationInfo = {
+            type: 'draw-steel',
+            duration: null,
+            remaining: null,
+            label: 'Respite', // Draw Steel abbreviation for next respite
+            end: {
+              type: 'respite',
+              roll: null
+            }
+          };
+          break;
+        }
+      }
+    }
+
+    const abilityData = {
+      sourceActorId: sourceActorId,
+      sourcePlayerName: sourcePlayerName,
+      itemId: null,
+      itemName: abilityName,
+      ability: {
+        name: abilityName,
+        img: 'icons/svg/daze.svg',
+        system: {
+          effects: [],
+          duration: durationInfo
+        }
+      },
+      duration: durationInfo
     };
 
-    console.log(`${MODULE_ID}: Extracted ability data:`, abilityData);
-    return abilityData;
+        return abilityData;
   } catch (error) {
     console.error(`${MODULE_ID}: Error extracting ability data from message:`, error);
     return null;
@@ -877,18 +844,15 @@ async function extractAbilityDataFromMessage(message) {
  */
 async function prepareHookPayload(entry) {
   try {
-    // Get source actor and item data
     let sourceActor = null;
     let sourceItem = null;
     let keywords = [];
 
     if (entry.sourceItemId) {
-      // Try to get source actor first
       if (entry.sourceActorId) {
         sourceActor = game.actors.get(entry.sourceActorId);
       }
 
-      // Get source item and extract keywords
       if (sourceActor && entry.sourceItemId) {
         sourceItem = sourceActor.items.get(entry.sourceItemId);
         if (sourceItem?.system?.keywords) {
@@ -896,35 +860,27 @@ async function prepareHookPayload(entry) {
         }
       }
     } else {
-      // Even without sourceItemId, try to get source actor from entry
       if (entry.sourceActorId) {
         sourceActor = game.actors.get(entry.sourceActorId);
       }
     }
 
-    // Get source token data
     const sourceTokenData = sourceActor ? getSourceToken(sourceActor) : null;
-
-    // Get target actor and token data
     const targetActor = game.actors.get(entry.targetActorId);
     const targetTokenData = getTargetToken(entry.targetTokenId);
 
-    // Sanitize damage type - default to 'damage' if empty
     const damageType = entry.damageType || 'damage';
 
-    // Build the hook payload without circular references
     const payload = {
-      // Core damage data
       type: entry.type,
       amount: entry.amount,
       damageType: damageType,
 
-      // Source information
       sourceActorId: entry.sourceActorId || null,
       sourceActorUuid: sourceActor?.uuid || null,
       sourceTokenId: sourceTokenData?.id || null,
       sourceTokenUuid: sourceTokenData?.uuid || null,
-      sourceItemName: entry.sourceItemName || 'Attack',  // Add source item name with default
+      sourceItemName: entry.sourceItemName || 'Attack',
       sourceItemId: entry.sourceItemId || null,
       sourceItemUuid: sourceItem?.uuid || null,
       sourceItem: sourceItem ? {
@@ -934,7 +890,6 @@ async function prepareHookPayload(entry) {
         img: sourceItem.img
       } : null,
 
-      // Target information (without circular token reference)
       targetActorId: entry.targetActorId,
       targetActorUuid: targetActor?.uuid || null,
       targetTokenId: targetTokenData?.id || null,
@@ -946,10 +901,8 @@ async function prepareHookPayload(entry) {
         img: targetActor.img
       } : null,
 
-      // Animation data
       keywords: keywords,
 
-      // Metadata
       eventId: entry.eventId || `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: entry.timestamp || Date.now(),
       isCritical: entry.isCritical || false,
@@ -966,8 +919,6 @@ async function prepareHookPayload(entry) {
 
 /**
  * Get source token from actor with UUID support
- * @param {Actor} actor - The source actor
- * @returns {Object|null} Token object with id and uuid, or null if not found
  */
 function getSourceToken(actor) {
   if (!actor) return null;
@@ -984,8 +935,6 @@ function getSourceToken(actor) {
 
 /**
  * Get target token from canvas with UUID support
- * @param {string|null} tokenId - The token ID
- * @returns {Object|null} Token object with id and uuid, or null if not found
  */
 function getTargetToken(tokenId) {
   if (!tokenId) return null;
@@ -1005,7 +954,6 @@ function getTargetToken(tokenId) {
  */
 Hooks.on('renderChatMessageHTML', (message, html) => {
   if (!(html instanceof HTMLElement)) {
-    console.warn(`${MODULE_ID}: html is not an HTMLElement, skipping undo handler`);
     return;
   }
 
@@ -1059,47 +1007,21 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
   });
 });
 
-// MINIMAL CHAT-SCOPED LISTENER - Test if buttons live in chat DOM
-Hooks.on("renderChatLog", (app, html) => {
-  console.log("ds-quick-strike: renderChatLog wired");
-
-  html[0].addEventListener("click", (event) => {
-    console.log("ds-quick-strike: chat click", event.target.tagName);
-
-    const statusBtn = event.target.closest('button[data-type="status"]');
-    if (!statusBtn) return;
-
-    console.log(
-      "ds-quick-strike: STATUS BUTTON",
-      statusBtn.textContent?.trim(),
-      statusBtn.dataset
-    );
-  }, true);
-});
-
 // =========================================================================
 // EVENT DELEGATION: Status Button Handler (PERMANENT DOCUMENT LISTENER)
 // =========================================================================
-// This works because it listens on document (always exists) regardless of when
-// Draw Steel renders the buttons. Uses capture phase to intercept before handlers.
 
 Hooks.once("ready", () => {
-  console.log(`${MODULE_ID}: Installing status button event delegation...`);
-
+  
   document.addEventListener("click", async (event) => {
-    // Match status button from ANY click that bubbles up
     const statusBtn = event.target.closest('button[data-type="status"]');
     if (!statusBtn) return;
 
-    // FOUND IT - intercept before Draw Steel's handler
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
 
-    console.log(`${MODULE_ID}: ✅ STATUS BUTTON INTERCEPTED:`, statusBtn.textContent.trim());
-
     try {
-      // Get the chat message
       const messageEl = statusBtn.closest("[data-message-id]");
       if (!messageEl) throw new Error("No message element");
 
@@ -1107,23 +1029,16 @@ Hooks.once("ready", () => {
       const message = game.messages.get(messageId);
       if (!message) throw new Error("Message not found: " + messageId);
 
-      // Extract status from button
       const statusId = statusBtn.dataset.effectId;
       const statusName = statusBtn.textContent.trim();
       const effectUuid = statusBtn.dataset.uuid;
 
-      console.log(`${MODULE_ID}: Status details:`, { statusName, statusId });
-
-      // Get targets (CRITICAL: not owned token)
       const targets = Array.from(game.user.targets);
       if (!targets.length) {
         ui.notifications.warn("Select a target to apply status");
         return;
       }
 
-      console.log(`${MODULE_ID}: Targets:`, targets.map(t => t.name));
-
-      // Get ability data
       const abilityData = await extractAbilityDataFromMessage(message);
       if (!abilityData) {
         console.warn(`${MODULE_ID}: No ability data extracted`);
@@ -1131,17 +1046,15 @@ Hooks.once("ready", () => {
         return;
       }
 
-      // Verify socket available
       if (!socket) {
         console.error(`${MODULE_ID}: Socket not available`);
         ui.notifications.error("Socket not available");
         return;
       }
 
-      // Apply status to each target via socket
       for (const target of targets) {
-        console.log(`${MODULE_ID}: Applying ${statusName} to ${target.name}...`);
 
+        
         const result = await socket.executeAsGM("applyStatusToTarget", {
           tokenId: target.id,
           statusName,
@@ -1150,12 +1063,12 @@ Hooks.once("ready", () => {
           sourceActorId: abilityData.sourceActorId,
           sourceItemId: abilityData.itemId,
           sourceItemName: abilityData.itemName,
-          sourcePlayerName: game.user.name,
+          sourcePlayerName: abilityData.sourcePlayerName || game.user.name,
           ability: abilityData.ability,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          duration: abilityData.duration
         });
 
-        // Better error handling for socket result
         if (!result) {
           console.error(`${MODULE_ID}: Socket returned no result`);
           ui.notifications.error("Socket error - no response");
@@ -1163,7 +1076,6 @@ Hooks.once("ready", () => {
         }
 
         if (result.success) {
-          console.log(`${MODULE_ID}: ✅ ${statusName} applied to ${target.name}`);
           ui.notifications.info(`Applied ${statusName} to ${target.name}`);
         } else {
           console.error(`${MODULE_ID}: Failed to apply ${statusName}:`, result.error);
@@ -1176,13 +1088,16 @@ Hooks.once("ready", () => {
       ui.notifications.error(`Error: ${error.message}`);
     }
 
-  }, { capture: true }); // Capture phase intercepts FIRST
+  }, { capture: true });
 
-  console.log(`${MODULE_ID}: Status button event delegation ready`);
-});
+  });
 
-// Handle status undo button clicks in chat (keep existing undo logic)
+// Handle status undo button clicks in chat
 Hooks.on('renderChatMessageHTML', (message, html) => {
+  if (!(html instanceof HTMLElement)) {
+    return;
+  }
+
   const statusUndoBtn = html.querySelector('.status-undo-btn');
   if (!statusUndoBtn) return;
 
@@ -1193,14 +1108,16 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
     const actorId = statusUndoBtn.dataset.targetActor;
     const effectId = statusUndoBtn.dataset.effectId;
     const statusName = statusUndoBtn.dataset.statusName;
+    const statusId = statusUndoBtn.dataset.statusId;
     const eventId = statusUndoBtn.dataset.eventId ?? null;
 
+    
     if (!game.user.isGM) {
       ui.notifications.error('Only GM can undo status');
       return;
     }
 
-    const result = await handleGMUndoStatus({ tokenId, actorId, effectId, statusName, eventId });
+    const result = await handleGMUndoStatus(tokenId, actorId, effectId, statusName, statusId, eventId);
 
     if (result.success) {
       ui.notifications.info(`Undo successful - ${statusName} removed`);
@@ -1229,10 +1146,8 @@ async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, t
       return { success: false, error: "Actor not found" };
     }
 
-    console.log(`${MODULE_ID}: GM undoing damage to ${actor.name}, restoring Stamina to Perm=${originalPerm}, Temp=${originalTemp}`);
-
+    
     const currentStamina = getStaminaSnapshot(actor);
-    console.log(`${MODULE_ID}: Current Stamina: Perm=${currentStamina.permanent}, Temp=${currentStamina.temporary}`);
 
     const boundedStamina = applyStaminaBounds(actor, { permanent: originalPerm, temporary: originalTemp });
 
@@ -1241,7 +1156,6 @@ async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, t
       'system.stamina.temporary': boundedStamina.temporary
     });
 
-    // Log undo audit trail
     const undoTime = new Date().toLocaleTimeString();
     const undoMessage = `
       <div style="font-family: monospace; padding: 8px; border-left: 3px solid #2a9d8f;">
@@ -1258,39 +1172,28 @@ async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, t
       whisper: gmUsers
     });
 
-    // Store undoTime in damageHistory for tracking
     const historyEntry = damageHistory.find(h => h.messageId === messageId);
     if (historyEntry) {
       historyEntry.undoTime = undoTime;
     }
 
-    // Fire animation undo hook
     if (eventId) {
       try {
         const targetTokenData = getTargetToken(targetTokenId);
         const undoPayload = {
-          // Correlation data
           eventId: eventId,
-
-          // Target information
           targetName: targetName,
           targetTokenId: targetTokenData?.id || null,
           targetTokenUuid: targetTokenData?.uuid || null,
           targetToken: targetTokenData?.token || null,
-
-          // Damage data being undone
           amount: Math.abs(boundedStamina.permanent - currentStamina.permanent),
           damageType: historyEntry?.damageType || 'untyped',
-
-          // Original entry
           entry: historyEntry || null
         };
 
         Hooks.callAll('ds-quick-strike:damageUndone', undoPayload);
-        console.log(`${MODULE_ID}: Fired ds-quick-strike:damageUndone hook with eventId: ${eventId}`);
       } catch (hookError) {
         console.error(`${MODULE_ID}: Error firing damageUndone hook:`, hookError);
-        // Continue without breaking the undo flow
       }
     }
 
@@ -1306,126 +1209,110 @@ async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, t
 }
 
 /**
- * GM handler – Apply a status effect to a target based on ability effect definition
+ * GM handler – Apply a Draw Steel status condition to a target
  */
 async function handleGMApplyStatus({
   tokenId,
   statusName,
-  statusId = null,
-  statusUuid = null,
+  statusId,
+  statusUuid,
   sourceActorId,
   sourceItemId,
   sourceItemName,
   sourcePlayerName,
   ability = null,
   timestamp,
-  eventId = null
+  eventId = null,
+  duration = null
 }) {
-  console.log(`${MODULE_ID}: ===== GM STATUS APPLICATION HANDLER =====`);
-  console.log(`${MODULE_ID}: GM applying status "${statusName}" to token ${tokenId}`);
-  console.log(`${MODULE_ID}: Full parameters:`, {
-    tokenId,
-    statusName,
-    statusId,
-    statusUuid,
-    sourceActorId,
-    sourceItemId,
-    sourceItemName,
-    sourcePlayerName,
-    ability,
-    timestamp,
-    eventId
-  });
-
   if (!game.user.isGM) {
-    console.error(`${MODULE_ID}: Not authorized - user is not GM`);
-    console.error(`${MODULE_ID}: Current user:`, game.user);
     return { success: false, error: "Unauthorized" };
   }
-  console.log(`${MODULE_ID}: GM authorization confirmed`);
 
   try {
-    console.log(`${MODULE_ID}: Looking up token ${tokenId} on canvas...`);
     const token = canvas.tokens.get(tokenId);
     if (!token) {
-      console.error(`${MODULE_ID}: Token not found: ${tokenId}`);
-      console.error(`${MODULE_ID}: Available tokens:`, canvas.tokens.map(t => `${t.name} (${t.id})`));
       return { success: false, error: "Token not found" };
     }
-    console.log(`${MODULE_ID}: Found token: ${token.name}`);
 
     const actor = token.actor;
     if (!actor) {
-      console.error(`${MODULE_ID}: Actor not found for token: ${tokenId}`);
-      console.error(`${MODULE_ID}: Token document:`, token.document);
       return { success: false, error: "Actor not found" };
     }
-    console.log(`${MODULE_ID}: Found actor: ${actor.name} (${actor.id})`);
-    console.log(`${MODULE_ID}: Actor type: ${actor.type}`);
-    console.log(`${MODULE_ID}: Current active effects:`, actor.effects.map(e => `${e.name} (${e.id})`));
 
-    console.log(`${MODULE_ID}: Applying status "${statusName}" to ${actor.name}`);
+    // Find in CONFIG
+    const existingStatus = CONFIG.statusEffects.find(e => e.id === statusId);
 
-    // Build the Active Effect from the ability's effect definition
-    console.log(`${MODULE_ID}: Building effect from ability...`);
-    let effectData = buildActiveEffectFromAbility(ability, statusName, statusId, statusUuid, sourceActorId, sourceItemId);
-
-    if (!effectData) {
-      console.error(`${MODULE_ID}: Failed to build effect data from ability:`, ability);
-      return { success: false, error: "Could not build effect data" };
-    }
-    console.log(`${MODULE_ID}: Built effect data:`, effectData);
-
-    // Create the Active Effect on the target actor
-    console.log(`${MODULE_ID}: Creating Active Effect on actor...`);
-    const created = await actor.createEmbeddedDocuments("ActiveEffect", [effectData]);
-
-    if (!created.length) {
-      console.error(`${MODULE_ID}: No effects created, creation failed`);
-      return { success: false, error: "Failed to create effect" };
+    if (!existingStatus) {
+      console.error(`${MODULE_ID}: Status "${statusId}" not found in CONFIG.statusEffects`);
+      return { success: false, error: `Status ${statusId} not found` };
     }
 
-    const effectId = created[0].id;
-    console.log(`${MODULE_ID}: Successfully created effect with ID: ${effectId}`);
-    console.log(`${MODULE_ID}: Created effect:`, created[0]);
-    console.log(`${MODULE_ID}: Status effect created on ${actor.name}:`, effectId);
+    // Check if the status is already active
+    const hasStatus = actor.effects.some(e => e.getFlag('core', 'statusId') === statusId);
 
-    // Generate unique eventId if not provided
+    if (!hasStatus) {
+      // Pass the effect end type if duration is available
+      const effectEnd = duration?.end?.type || "";
+      await actor.toggleStatusEffect(statusId, { active: true, overlay: false, effectEnd: effectEnd });
+    }
+
+    // Find the created effect for tracking
+    let appliedEffect = actor.effects.find(e => e && e.getFlag && e.getFlag('core', 'statusId') === statusId);
+
+    // Fallback: find by name if flag lookup fails
+    if (!appliedEffect) {
+      appliedEffect = actor.effects.find(e => e && e.name === statusName);
+    }
+
+    // Second fallback: find by ID pattern
+    if (!appliedEffect && statusId === 'slowed') {
+      appliedEffect = actor.effects.find(e => e && e.id && e.id.includes('slowed'));
+    }
+
+    const effectId = appliedEffect?.id;
+
+    // Set the source information on the created effect if it exists
+    if (appliedEffect && sourceActorId) {
+      await appliedEffect.update({
+        'system.source': {
+          actorId: sourceActorId,
+          actorName: sourcePlayerName ?? "Unknown",
+          itemId: sourceItemId,
+          itemName: sourceItemName
+        }
+      });
+    }
+
     const generatedEventId = eventId || `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // Log to chat
-    try {
-      await logStatusToChat({
-        type: "apply",
-        statusName: statusName,
-        statusId: statusId,
-        statusUuid: statusUuid,
-        targetName: actor.name,
-        targetTokenId: token.id,
-        targetActorId: actor.id,
-        sourceActorId: sourceActorId,
-        sourceActorName: game.actors.get(sourceActorId)?.name ?? "Unknown",
-        sourceItemId: sourceItemId,
-        sourceItemName: sourceItemName,
-        sourcePlayerName: sourcePlayerName,
-        source: "socket",
-        effectId: effectId,
-        eventId: generatedEventId,
-        timestamp: timestamp
-      });
-    } catch (logError) {
-      console.error(`${MODULE_ID}: Error logging status to chat`, logError);
-    }
+    await logStatusToChat({
+      type: "apply",
+      statusName: statusName,
+      statusId: statusId,
+      statusUuid: statusUuid,
+      targetName: actor.name,
+      targetTokenId: token.id,
+      targetActorId: actor.id,
+      sourceActorId: sourceActorId,
+      sourceActorName: sourcePlayerName ?? "Unknown", // Use the player name as source
+      sourceItemId: sourceItemId,
+      sourceItemName: sourceItemName,
+      sourcePlayerName: sourcePlayerName,
+      source: "socket",
+      effectId: effectId,
+      eventId: generatedEventId,
+      timestamp: timestamp,
+      duration: duration
+    });
 
-    // Fire hook for animation system
-    console.log(`${MODULE_ID}: ===== FIRING STATUS APPLIED HOOK =====`);
     const hookPayload = {
       actorId: actor.id,
       tokenId: token.id,
       statusName: statusName,
       statusId: statusId,
       statusUuid: statusUuid,
-      effectId: effectId,
+      effectId: null,
       sourceActorId: sourceActorId,
       sourceItemId: sourceItemId,
       sourceItemName: sourceItemName,
@@ -1434,17 +1321,14 @@ async function handleGMApplyStatus({
       eventId: generatedEventId,
       timestamp: timestamp
     };
-    console.log(`${MODULE_ID}: Hook payload:`, hookPayload);
-    console.log(`${MODULE_ID}: Firing ds-quick-strikeStatusApplied hook...`);
 
     try {
       Hooks.callAll("ds-quick-strikeStatusApplied", hookPayload);
-      console.log(`${MODULE_ID}: Hook fired successfully`);
     } catch (hookError) {
       console.error(`${MODULE_ID}: Error firing ds-quick-strikeStatusApplied hook`, hookError);
     }
 
-    return { success: true, effectId: effectId, statusName: statusName };
+    return { success: true, statusName: statusName };
 
   } catch (error) {
     console.error(`${MODULE_ID}: GM apply status error`, error);
@@ -1453,38 +1337,34 @@ async function handleGMApplyStatus({
 }
 
 /**
- * GM handler – Undo a status effect application
+ * GM handler – Undo a Draw Steel status condition
  */
-async function handleGMUndoStatus({
-  tokenId,
-  actorId,
-  effectId,
-  statusName,
-  eventId = null
-}) {
-  if (!game.user.isGM) {
-    return { success: false, error: "Unauthorized" };
-  }
+async function handleGMUndoStatus(
+  tokenId, actorId, effectId, statusName, statusId, eventId = null
+) {
+  if (!game.user.isGM) return { success: false, error: "Unauthorized" };
 
   try {
     const token = tokenId ? canvas.tokens.get(tokenId) : null;
-    const actor = actorId ? game.actors.get(actorId) : token?.actor;
+    const actor = token?.actor || (actorId ? game.actors.get(actorId) : null);
 
     if (!actor) {
+      console.error(`${MODULE_ID}: Actor lookup failed - tokenId=${tokenId}, actorId=${actorId}`);
       return { success: false, error: "Actor not found" };
     }
 
-    console.log(`${MODULE_ID}: GM undoing status "${statusName}" on ${actor.name}`);
+    // Find by name matching
+    const statusEffect = actor.effects.find(e =>
+      e.name.toLowerCase() === statusName.toLowerCase()
+    );
 
-    // Delete the effect
-    const effect = actor.effects.get(effectId);
-    if (!effect) {
-      return { success: false, error: "Effect not found" };
+    if (!statusEffect) {
+      console.warn(`${MODULE_ID}: Effect not found: "${statusName}"`);
+      return { success: false, error: `Status not found on ${actor.name}` };
     }
 
-    await effect.delete();
+    await statusEffect.delete();
 
-    // Log undo to chat
     const undoTime = new Date().toLocaleTimeString();
     const undoMessage = `
       <div style="font-family: monospace; padding: 8px; border-left: 3px solid #2196F3; opacity: 0.7;">
@@ -1506,13 +1386,12 @@ async function handleGMUndoStatus({
       whisper: gmUsers
     });
 
-    // Fire undo hook for animation system
     try {
       Hooks.callAll("ds-quick-strikeStatusUndone", {
         actorId: actor.id,
         tokenId: token?.id ?? null,
         statusName: statusName,
-        effectId: effectId,
+        effectId: null,
         eventId: eventId,
         timestamp: Date.now()
       });
@@ -1526,132 +1405,4 @@ async function handleGMUndoStatus({
     console.error(`${MODULE_ID}: GM undo status error`, error);
     return { success: false, error: error.message };
   }
-}
-
-/**
- * Build Active Effect from ability data
- */
-function buildActiveEffectFromAbility(
-  ability,
-  statusName,
-  statusId,
-  statusUuid = null,
-  sourceActorId,
-  sourceItemId
-) {
-  console.log(`${MODULE_ID}: ===== BUILDING ACTIVE EFFECT =====`);
-  console.log(`${MODULE_ID}: Parameters:`, {
-    statusName,
-    statusId,
-    statusUuid,
-    sourceActorId,
-    sourceItemId,
-    ability
-  });
-
-  if (!ability || !ability.system?.effects) {
-    console.warn(`${MODULE_ID}: No valid ability or effect data provided, creating minimal effect for ${statusName}`);
-    console.log(`${MODULE_ID}: Ability provided:`, !!ability);
-    console.log(`${MODULE_ID}: Ability.system.effects:`, ability?.system?.effects?.length || 0);
-    // Create a minimal effect structure for testing
-    const minimalEffect = {
-      name: statusName,
-      icon: ability?.img || "icons/svg/status.svg",
-      origin: `Actor.${sourceActorId}.Item.${sourceItemId}`,
-      duration: { rounds: 1, startRound: 0, startTurn: 0 },
-      disabled: false,
-      flags: {
-        ds: {
-          statusName: statusName,
-          statusId: statusId,
-          statusUuid: statusUuid,
-          sourceItemId: sourceItemId,
-          sourceItemName: 'Status Effect',
-          enrich: `@ds/status[${statusName.toLowerCase().replace(/ /g, "-")}]`
-        }
-      },
-      changes: []
-    };
-
-    return minimalEffect;
-  }
-
-  // Find the effect in the ability's effects array that matches the status name or ID
-  console.log(`${MODULE_ID}: Searching for effect definition in ability...`);
-  console.log(`${MODULE_ID}: Ability effects array:`, ability.system?.effects);
-
-  const effectDef = ability.system?.effects?.find(e =>
-    e.name === statusName || e.id === statusId
-  );
-
-  console.log(`${MODULE_ID}: Found effect definition:`, effectDef);
-
-  if (!effectDef) {
-    console.log(`${MODULE_ID}: Effect "${statusName}" not found in ability, creating minimal effect`);
-    console.log(`${MODULE_ID}: Tried to match by name "${statusName}" or ID "${statusId}"`);
-    // Create a minimal effect structure for testing
-    const minimalEffect = {
-      name: statusName,
-      icon: ability.img || "icons/svg/status.svg",
-      origin: `Actor.${sourceActorId}.Item.${sourceItemId}`,
-      duration: { rounds: 1, startRound: 0, startTurn: 0 },
-      disabled: false,
-      flags: {
-        ds: {
-          statusName: statusName,
-          statusId: statusId,
-          statusUuid: statusUuid,
-          sourceItemId: sourceItemId,
-          sourceItemName: ability.name || 'Status Effect',
-          enrich: `@ds/status[${statusName.toLowerCase().replace(/ /g, "-")}]`
-        }
-      },
-      changes: []
-    };
-
-    return minimalEffect;
-  }
-
-  console.log(`${MODULE_ID}: Building effect from definition for ${statusName}`);
-
-  // Determine duration from the effect (Draw Steel uses "save ends" etc.)
-  let duration = { rounds: 1, startRound: 0, startTurn: 0 };
-
-  // TODO: Parse Draw Steel effect tier structure to determine correct duration
-  // For now, assume single round or use the ability's documented duration
-
-  // Build the Active Effect document
-  const effectData = {
-    name: statusName,
-    icon: ability.img || "icons/svg/status.svg",
-    origin: `Actor.${sourceActorId}.Item.${sourceItemId}`,
-    duration: duration,
-    disabled: false,
-
-    // Use Draw Steel flags for enricher support
-    flags: {
-      ds: {
-        statusName: statusName,
-        statusId: statusId,
-        statusUuid: statusUuid, // Store the original UUID
-        sourceItemId: sourceItemId,
-        sourceItemName: ability.name,
-        // Store the enricher reference so it renders properly in tooltips
-        enrich: `@ds/status[${statusName.toLowerCase().replace(/ /g, "-")}]`
-      }
-    },
-
-    // You can add changes array if you want to modify actor stats
-    // For statuses like "Slowed", you might reduce action economy:
-    changes: [
-      // Example: slowed reduces actions per turn
-      // {
-      //   key: "system.combat.actions",
-      //   mode: CONST.ACTIVE_EFFECT_MODES.MULTIPLY,
-      //   value: 0.5
-      // }
-    ]
-  };
-
-  return effectData;
 }

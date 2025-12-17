@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.7] - 2025-12-16
+
+### Fixed
+- **Status Effect Duration Integration**: Draw Steel status effects now properly display duration information (e.g., "Save Ends", "End of Turn") in the ActiveEffect UI
+- **Status Effect Source Information**: Status effects now properly populate their source field with actor and item information
+- **Improved Status Undo**: Undo functionality now uses proper status toggle instead of direct effect manipulation
+- **Enhanced Error Handling**: Added defensive checks for undefined effects and improved robustness of effect lookup
+- **Console Logging Cleanup**: Reduced verbose debug logging for cleaner console output (errors and warnings remain)
+
+### Technical Details
+- Status duration parsing now properly extracts and converts Draw Steel duration formats to Foundry's duration system
+- Multiple fallback methods for effect lookup ensure reliability across different status configurations
+- Effect source information is now populated via `appliedEffect.update()` after creation
+- All status duration types are supported: save ends, end of turn, end of encounter, next respite
+
 ## [1.6.5] - 2025-12-12
 
 ### Fixed
