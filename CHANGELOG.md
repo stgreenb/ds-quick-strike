@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2025-12-20
+
+### Changed
+- **Repository Cleanup**: Removed development artifacts and unnecessary files
+- **File Organization**: Cleaned up repository to contain only essential files
+
+### Removed
+- Development documentation files
+- Test and debug JSON files
+- Duplicate ds-quick-strike directory
+- Old zip artifacts
+
 ## [1.6.7] - 2025-12-16
 
 ### Fixed
