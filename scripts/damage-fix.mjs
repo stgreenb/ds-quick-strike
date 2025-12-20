@@ -19,6 +19,76 @@ Hooks.once('socketlib.ready', () => {
   } catch (error) {
     console.error(`${MODULE_ID}: Failed to register socketlib:`, error);
   }
+
+  // Hook Draw Steel's TargetedConditionPrompt to auto-apply via socket when player triggered it
+  Hooks.on('ds-render-TargetedConditionPrompt', (app, html) => {
+    // Check if this was triggered by a non-GM player
+    if (game.user.isGM) return;
+
+    // Find and replace the dialog's button handler
+    const buttons = html.querySelectorAll('button');
+    const applyBtn = Array.from(buttons).find(b =>
+      b.textContent.includes('Apply') || b.textContent.includes('Confirm')
+    );
+
+    if (!applyBtn) return;
+
+    // Store original click handler
+    const originalHandler = applyBtn.onclick;
+
+    applyBtn.onclick = async function(event) {
+      event.preventDefault();
+
+      // Get the selected source actor
+      const form = html.querySelector('form');
+      const select = form?.querySelector('select');
+      const selectedActorId = select?.value;
+
+      if (!selectedActorId) {
+        ui.notifications.warn("Please select a source actor");
+        return;
+      }
+
+      const sourceActor = game.actors.get(selectedActorId);
+      const targetActor = app.object;  // The actor receiving the condition
+      const targetToken = targetActor.getActiveTokens()[0];
+
+      if (!targetToken || !sourceActor) {
+        ui.notifications.error("Missing target or source actor");
+        return;
+      }
+
+      // Get condition info
+      const statusId = app.statusId || app.effectId;
+      const statusName = app.statusName;
+
+      console.log(`[ds-quick-strike] Auto-applying ${statusName} via socket`);
+      console.log(`  Source: ${sourceActor.name} (${sourceActor.id})`);
+      console.log(`  Target: ${targetActor.name} (${targetToken.id})`);
+
+      // Send via socket so GM applies with correct source
+      const result = await socket.executeAsGM("applyStatusToTarget", {
+        tokenId: targetToken.id,
+        statusName: statusName,
+        statusId: statusId,
+        statusUuid: null,
+        sourceActorId: sourceActor.id,  // ← Player's character
+        sourceItemId: null,
+        sourceItemName: statusName,
+        sourcePlayerName: sourceActor.name,
+        ability: statusName,
+        timestamp: Date.now(),
+        duration: null
+      });
+
+      if (result?.success) {
+        ui.notifications.info(`${sourceActor.name} ${statusName.toLowerCase()} ${targetActor.name}`);
+        app.close();
+      } else {
+        ui.notifications.error(`Failed to apply: ${result?.error}`);
+      }
+    };
+  });
 });
 
 /**
@@ -87,14 +157,28 @@ function wrapActorTakeDamage(actor) {
   actor.system.takeDamage = async function(amount, options = {}) {
     const preStamina = getStaminaSnapshot(actor);
 
+    console.log(`${MODULE_ID}: WRAPPED TAKE DAMAGE DEBUG - Called with amount: ${amount}, options:`, options);
+    console.log(`${MODULE_ID}: WRAPPED TAKE DAMAGE DEBUG - Actor: ${actor.name}, Pre-stamina:`, preStamina);
+
+    const isHealing = amount < 0;
+    console.log(`${MODULE_ID}: WRAPPED TAKE DAMAGE DEBUG - Is healing: ${isHealing} (amount < 0)`);
+
     const result = await originalTakeDamage(amount, options);
+
+    console.log(`${MODULE_ID}: WRAPPED TAKE DAMAGE DEBUG - Original takeDamage result:`, result);
 
     const postStamina = getStaminaSnapshot(actor);
     const damageType = options.type || 'untyped';
 
+    console.log(`${MODULE_ID}: WRAPPED TAKE DAMAGE DEBUG - Post-stamina:`, postStamina);
+    console.log(`${MODULE_ID}: WRAPPED TAKE DAMAGE DEBUG - Stamina delta: permanent ${preStamina.permanent} → ${postStamina.permanent}, temporary ${preStamina.temporary} → ${postStamina.temporary}`);
+
     const caller = new Error().stack;
     const isSocketCall = caller.includes('handleGMDamageApplication') ||
                          caller.includes('handleGMHealApplication');
+
+    console.log(`${MODULE_ID}: WRAPPED TAKE DAMAGE DEBUG - Is socket call: ${isSocketCall}`);
+    console.log(`${MODULE_ID}: WRAPPED TAKE DAMAGE DEBUG - Amount > 0 check: ${amount > 0}`);
 
     const sourceItemId = options.sourceItemId || null;
     const eventId = `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -184,7 +268,7 @@ function installDamageOverride() {
 
       // Always use socket handlers for consistent logging
       if (socket) {
-        await applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName);
+        await applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName, message);
       } else {
         await originalCallback.call(this, event);
       }
@@ -243,23 +327,44 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
 /**
  * Send damage request to GM via socket
  */
-async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName) {
+async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName, message = null) {
   try {
     for (const target of targets) {
       const eventId = `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
       if (roll.isHeal) {
-        const result = await socket.executeAsGM('applyHealToTarget', {
+        console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Processing healing for target: ${target.name}`);
+        console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Healing amount: ${amount}`);
+        console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Roll type: ${roll.type}`);
+        console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Initial sourceActorId: ${sourceActorId}`);
+        console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Message speaker:`, message?.speaker);
+
+        // Get source actor ID from the message speaker or current character
+        let healSourceActorId = sourceActorId;
+        if (!healSourceActorId && message?.speaker?.actor) {
+          healSourceActorId = message.speaker.actor;
+          console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Using message speaker actor ID: ${healSourceActorId}`);
+        } else if (!healSourceActorId && game.user.character) {
+          healSourceActorId = game.user.character.id;
+          console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Using current user character ID: ${healSourceActorId}`);
+        }
+
+        const socketPayload = {
           tokenId: target.id,
           amount: amount,
           type: roll.type,
-          sourceActorName: sourceActorName,
-          sourceActorId: sourceActorId,
+          sourceActorId: healSourceActorId,
           sourceItemName: sourceItemName,
           sourcePlayerName: game.user.name,
           sourceItemId: roll.sourceItemId || null,
           eventId: eventId
-        });
+        };
+
+        console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Sending socket payload:`, socketPayload);
+
+        const result = await socket.executeAsGM('applyHealToTarget', socketPayload);
+
+        console.log(`${MODULE_ID}: SOCKET HEAL DEBUG - Socket result:`, result);
 
         if (result.success) {
           ui.notifications.info(`Healed ${target.name} for ${amount}`);
@@ -272,7 +377,7 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sour
           amount: amount,
           type: roll.type,
           ignoredImmunities: roll.ignoredImmunities || [],
-          sourceActorName: sourceActorName,
+          sourceActorName: sourceActorName || "GM Adjustment",
           sourceActorId: sourceActorId,
           sourceItemName: sourceItemName,
           sourcePlayerName: game.user.name,
@@ -399,7 +504,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
 /**
  * GM handler: Apply healing to a target
  */
-async function handleGMHealApplication({ tokenId, amount, type, sourceActorName, sourceActorId, sourceItemName, sourcePlayerName, sourceItemId, eventId }) {
+async function handleGMHealApplication({ tokenId, amount, type, sourceActorId, sourceItemName, sourcePlayerName, sourceItemId, eventId }) {
   if (!game.user.isGM) {
     return { success: false, error: "Unauthorized" };
   }
@@ -415,30 +520,40 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
       return { success: false, error: "Actor not found" };
     }
 
+    // Resolve actor name from ID
+    let sourceActorName = "GM Adjustment";
+    if (sourceActorId) {
+      const sourceActor = game.actors.get(sourceActorId);
+      if (sourceActor) {
+        sourceActorName = sourceActor.name;
+      }
+    }
+
     const originalStamina = getStaminaSnapshot(actor);
 
-    const isTemp = type !== "value";
-    const currentTemp = actor.system.stamina?.temporary || 0;
+    console.log(`${MODULE_ID}: HEALING DEBUG - Starting healing application`);
+    console.log(`${MODULE_ID}: HEALING DEBUG - Target: ${actor.name}`);
+    console.log(`${MODULE_ID}: HEALING DEBUG - Original stamina:`, originalStamina);
+    console.log(`${MODULE_ID}: HEALING DEBUG - Requested heal amount: ${amount}`);
+    console.log(`${MODULE_ID}: HEALING DEBUG - Type: ${type}`);
+    console.log(`${MODULE_ID}: HEALING DEBUG - Source actor: ${sourceActorName} (ID: ${sourceActorId})`);
 
-    if (isTemp && amount > currentTemp) {
-      console.warn(`${MODULE_ID}: Temporary stamina capped for ${actor.name}`);
-    }
+    // Don't use takeDamage for healing - it checks immunities even for negative amounts
+    // Instead, directly modify stamina to bypass immunity checks entirely
+    const healAmount = amount; // Just the positive amount we're healing
+    console.log(`${MODULE_ID}: HEALING DEBUG - Direct healing amount: ${healAmount}`);
 
-    await actor.modifyTokenAttribute(
-      isTemp ? "stamina.temporary" : "stamina.value",
-      amount,
-      !isTemp,
-      !isTemp
-    );
+    const currentStamina = actor.system.stamina.value;
+    const maxStamina = actor.system.stamina.max;
+    const newStaminaValue = Math.min(currentStamina + healAmount, maxStamina);
 
-    let newStamina = getStaminaSnapshot(actor);
+    console.log(`${MODULE_ID}: HEALING DEBUG - Stamina calculation: current=${currentStamina}, heal=${healAmount}, max=${maxStamina}, new=${newStaminaValue}`);
 
-    const max = actor.system?.stamina?.max || 0;
-    newStamina.permanent = Math.min(newStamina.permanent, max);
+    await actor.update({ "system.stamina.value": newStaminaValue });
 
-    if (newStamina.permanent !== getStaminaSnapshot(actor).permanent) {
-      await actor.update({'system.stamina.value': newStamina.permanent});
-    }
+    let newStamina = { permanent: newStaminaValue, temporary: actor.system.stamina.temporary || 0 };
+    console.log(`${MODULE_ID}: HEALING DEBUG - New stamina after direct update:`, newStamina);
+    console.log(`${MODULE_ID}: HEALING DEBUG - Stamina change: permanent ${originalStamina.permanent} → ${newStamina.permanent}, temporary ${originalStamina.temporary} → ${newStamina.temporary}`);
 
     await logDamageToChat({
       type: "heal",
@@ -475,6 +590,8 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
  */
 async function logDamageToChat(entry) {
   try {
+    console.log(`${MODULE_ID}: LOG DAMAGE DEBUG - Logging entry:`, entry);
+
     const icon = entry.type === 'damage' ? '⚔️' : '✨';
     const sourceLabel = entry.source === 'socket' ? `(via ${entry.sourcePlayerName})` : '(direct GM action)';
 
@@ -482,6 +599,10 @@ async function logDamageToChat(entry) {
     if (entry.originalStamina.temporary > 0 || entry.newStamina.temporary > 0) {
       staminaDisplay = `Perm: ${entry.originalStamina.permanent}→${entry.newStamina.permanent} | Temp: ${entry.originalStamina.temporary}→${entry.newStamina.temporary}`;
     }
+
+    console.log(`${MODULE_ID}: LOG DAMAGE DEBUG - Stamina display: ${staminaDisplay}`);
+    console.log(`${MODULE_ID}: LOG DAMAGE DEBUG - Entry type: ${entry.type}, amount: ${entry.amount}`);
+    console.log(`${MODULE_ID}: LOG DAMAGE DEBUG - Source actor name: ${entry.sourceActorName}`);
 
     const isPublic = game.settings.get(MODULE_ID, 'publicDamageLog');
 
@@ -1286,6 +1407,15 @@ async function handleGMApplyStatus({
 
     const generatedEventId = eventId || `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    // Resolve the actual character name from sourceActorId
+    let resolvedSourceName = sourcePlayerName ?? "Unknown";
+    if (sourceActorId) {
+      const sourceActor = game.actors.get(sourceActorId);
+      if (sourceActor) {
+        resolvedSourceName = sourceActor.name;  // Use Vistin, not Ken
+      }
+    }
+
     await logStatusToChat({
       type: "apply",
       statusName: statusName,
@@ -1295,7 +1425,7 @@ async function handleGMApplyStatus({
       targetTokenId: token.id,
       targetActorId: actor.id,
       sourceActorId: sourceActorId,
-      sourceActorName: sourcePlayerName ?? "Unknown", // Use the player name as source
+      sourceActorName: resolvedSourceName, // Now uses character name
       sourceItemId: sourceItemId,
       sourceItemName: sourceItemName,
       sourcePlayerName: sourcePlayerName,

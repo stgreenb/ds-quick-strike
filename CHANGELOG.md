@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.8] - 2025-12-20
+
+### Fixed
+- **Healing System**: Completely resolved healing functionality that was broken by immunity checks
+- **Stamina Calculation**: Fixed math bug where `Math.max(-amount, 0)` always returned 0, preventing any healing
+- **Immunity Bypass**: Healing now bypasses Draw Steel's immunity system by using direct stamina modification
+- **Source Attribution**: Status effects now properly display character names instead of player names in chat logs
+- **Player Status Application**: Added automatic status application via socket for non-GM players, eliminating GM confirmation prompts
+
+### Technical Details
+- Healing now uses direct `actor.update()` instead of `takeDamage()` to avoid immunity interference
+- Status source resolution now properly maps `sourceActorId` to character names
+- Added `ds-render-TargetedConditionPrompt` hook to intercept player status applications
+- Improved debugging throughout healing and status application flows
+
 ## [1.6.7] - 2025-12-16
 
 ### Fixed
