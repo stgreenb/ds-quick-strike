@@ -10,12 +10,13 @@ Foundry, by default, prevents players from applying damage tokens they don't own
 - Notifcations (via PM) to GM/Director with undo capibilites for damage
 - Quick reminders to players if they accidently target themselves for damage. 
 
-<img width="297" height="185" alt="Draw Steel Quick Strike in action" src="images/ds-quick-strike-demo.png" />
+<img title="" src="images/ds-quick-strike-demo.png" alt="Draw Steel Quick Strike in action" width="176" height="185" data-align="center">
 
 ## Requirements
 
- * SocketLib
- * A GM must be logged in
+* SocketLib
+* A GM must be logged in
+* Optional: [ds-aa-bridge.](https://github.com/stgreenb/ds-aa-bridge) - To add animations. 
 
 ## Settings
 
@@ -25,7 +26,6 @@ The module includes the following configurable settings:
 
 ## Stuff I might add (mostly inspired by MIDI QOL)
 
- - Batch Damage (Multiple Targets Summary)
- - Sound Effects / Annimations - Or likely a seperate mod
- - Damage History Log
- - Additional configuration options
+- Batch Damage (Multiple Targets Summary)
+- Damage History Log
+- Additional configuration options
