@@ -1,0 +1,78 @@
+# Foundry VTT
+/Data/
+!Data/modules/draw-steel-damage-fix/
+/Data/modules/draw-steel-damage-fix/*.log
+
+# Node modules (if any build tools are added)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+
+# Distribution/Build
+dist/
+build/
+*.tgz
+*.zip
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# AI tool directories (keep locally but don't commit)
+.claude/
+.clinerules/
+.crush/
+.factory/
+.gemini/
+.kilocode/
+.opencode/
+.roo/
+
+# AI documentation files
+AGENTS.md
+CLAUDE.md
+CLINE.md
+Clean-Working-Implementation.md
+Draw-Steel-Socket-Implementation.md
+IMPLEMENTATION_SUMMARY.md
+
+# Old implementation files
+module-fixed.json
+module-minimal.json
+module-test.json
+scripts/damage-fixed.mjs
+
+# OpenSpec (development only)
+openspec/
+
+# Old development folders and files
+ds-quick-strike/
+ds-quick-strike.zip
+
+# Distribution files
+*.zip
+ds-animations-guide.md
