@@ -1,1 +1,0 @@
-export const MODULE_ID = 'ds-quick-strike';
