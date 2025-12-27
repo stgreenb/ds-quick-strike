@@ -542,7 +542,6 @@ async function logDamageToChat(entry) {
         </div>
         <div style="margin-bottom: 4px;">
           ${entry.amount} ${entry.damageType}
-          (Stamina: ${staminaDisplay})
         </div>
       </div>
     `;
