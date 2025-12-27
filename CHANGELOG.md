@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2025-12-27
+
+### Fixed
+- **Healing Enricher Type Coercion**: Resolved validation error where healing buttons passed string values to actor methods expecting integers
+- **Three-Layer Validation**: Implemented comprehensive type validation at socket boundary, handler level, and actor method level
+- **Direct Actor Updates**: Replaced modifyTokenAttribute with direct actor updates to ensure integer values
+
+### Changed
+- **Public Damage Log Privacy**: Players no longer see stamina values in public damage/healing messages
+- Public messages now only show target name, source, and damage amount (e.g., "Ghost kobold hit by Pyre 6 fire")
+- GM continues to see full stamina details and undo buttons in private messages
+
 ## [1.8.0] - 2025-12-20
 
 ### Fixed
