@@ -10,8 +10,32 @@ const originalTakeDamageMap = new Map();
 Hooks.once('socketlib.ready', () => {
   try {
     socket = socketlib.registerModule(MODULE_ID);
-    socket.register('applyDamageToTarget', handleGMDamageApplication);
-    socket.register('applyHealToTarget', handleGMHealApplication);
+
+    // ✅ Wrapped handlers with type coercion (Layer 1: Socket Handler Wrapper)
+    socket.register('applyDamageToTarget', async (data) => {
+      // Ensure amount is coerced to integer
+      if (typeof data.amount === 'string') {
+        data.amount = Math.round(parseFloat(data.amount) || 0);
+      }
+      if (isNaN(data.amount)) {
+        console.error(`${MODULE_ID}: Invalid damage amount: ${data.amount}`);
+        return { success: false, error: "Invalid damage amount" };
+      }
+      return handleGMDamageApplication(data);
+    });
+
+    socket.register('applyHealToTarget', async (data) => {
+      // Ensure amount is coerced to integer
+      if (typeof data.amount === 'string') {
+        data.amount = Math.round(parseFloat(data.amount) || 0);
+      }
+      if (isNaN(data.amount)) {
+        console.error(`${MODULE_ID}: Invalid healing amount: ${data.amount}`);
+        return { success: false, error: "Invalid healing amount" };
+      }
+      return handleGMHealApplication(data);
+    });
+
     socket.register('undoLastDamage', handleGMUndoDamage);
     socket.register('applyStatusToTarget', handleGMApplyStatus);
     socket.register('undoStatusApplication', handleGMUndoStatus);
@@ -85,6 +109,9 @@ function wrapActorTakeDamage(actor) {
   originalTakeDamageMap.set(actor.id, originalTakeDamage);
 
   actor.system.takeDamage = async function(amount, options = {}) {
+    // ✅ Layer 3: Actor method guard (BELT & SUSPENDERS)
+    amount = Math.round(parseFloat(amount) || 0);
+
     const preStamina = getStaminaSnapshot(actor);
 
     const result = await originalTakeDamage(amount, options);
@@ -340,6 +367,13 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
     return { success: false, error: "Unauthorized" };
   }
 
+  // ✅ Layer 2: Handler-level validation (DEFENSIVE)
+  amount = Math.round(parseFloat(amount) || 0);
+  if (isNaN(amount)) {
+    console.error(`${MODULE_ID}: Invalid damage amount: ${amount}`);
+    return { success: false, error: "Invalid damage amount" };
+  }
+
   try {
     const token = canvas.tokens.get(tokenId);
     if (!token) {
@@ -404,6 +438,13 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
     return { success: false, error: "Unauthorized" };
   }
 
+  // ✅ Layer 2: Handler-level validation (DEFENSIVE)
+  amount = Math.round(parseFloat(amount) || 0);
+  if (isNaN(amount)) {
+    console.error(`${MODULE_ID}: Invalid healing amount: ${amount}`);
+    return { success: false, error: "Invalid healing amount" };
+  }
+
   try {
     const token = canvas.tokens.get(tokenId);
     if (!token) {
@@ -424,21 +465,25 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
       console.warn(`${MODULE_ID}: Temporary stamina capped for ${actor.name}`);
     }
 
-    await actor.modifyTokenAttribute(
-      isTemp ? "stamina.temporary" : "stamina.value",
-      amount,
-      !isTemp,
-      !isTemp
-    );
+    // Direct update to avoid modifyTokenAttribute string conversion issues
+    if (isTemp) {
+      // Temporary stamina healing
+      const newTemp = Math.round(parseFloat(actor.system.stamina?.temporary || 0) + amount);
+      await actor.update({
+        'system.stamina.temporary': newTemp
+      });
+    } else {
+      // Permanent stamina healing
+      const newPerm = Math.round(parseFloat(actor.system.stamina?.value || 0) + amount);
+      const max = actor.system?.stamina?.max || 0;
+      const boundedPerm = Math.min(newPerm, max);
+
+      await actor.update({
+        'system.stamina.value': boundedPerm
+      });
+    }
 
     let newStamina = getStaminaSnapshot(actor);
-
-    const max = actor.system?.stamina?.max || 0;
-    newStamina.permanent = Math.min(newStamina.permanent, max);
-
-    if (newStamina.permanent !== getStaminaSnapshot(actor).permanent) {
-      await actor.update({'system.stamina.value': newStamina.permanent});
-    }
 
     await logDamageToChat({
       type: "heal",
