@@ -16,7 +16,11 @@ Foundry, by default, prevents players from applying damage tokens they don't own
 
 * SocketLib
 * A GM must be logged in
-* Optional: [ds-aa-bridge.](https://github.com/stgreenb/ds-aa-bridge) - To add animations. 
+* Optional: [ds-aa-bridge.](https://github.com/stgreenb/ds-aa-bridge) - To add animations.
+
+## Discord
+
+Join the discussion about this and other Foundry mods in the **[Draw Steel Foundry Mods Discord thread](https://discord.com/channels/332362513368875008/1448382845692416000)**.
 
 ## Settings
 
