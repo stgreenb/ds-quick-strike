@@ -1199,15 +1199,6 @@ Hooks.once("ready", () => {
     const enricherBtn = damageBtn || healBtn || applyBtn || gainBtn;
 
     // Debug: log clicks on roll-links (enricher class name)
-    if (!enricherBtn && clickedEl.closest('.roll-link')) {
-      console.log(`${MODULE_ID}: [DEBUG] Clicked roll-link:`, {
-        tag: clickedEl.tagName,
-        className: clickedEl.className,
-        text: clickedEl.textContent?.trim()?.substring(0, 50),
-        dataset: clickedEl.dataset
-      });
-    }
-
     if (!enricherBtn) return;
 
     // Determine the action type
@@ -1216,9 +1207,7 @@ Hooks.once("ready", () => {
     else if (applyBtn) actionType = 'apply';
     else if (gainBtn) actionType = 'gain';
 
-    console.log(`${MODULE_ID}: [ENRICHER] ${actionType.toUpperCase()} intercepted`);
-    console.log(`${MODULE_ID}: [ENRICHER] Tag: ${enricherBtn.tagName}, class: ${enricherBtn.className}, text: "${enricherBtn.textContent?.trim()}"`);
-    console.log(`${MODULE_ID}: [ENRICHER] Dataset:`, enricherBtn.dataset);
+    console.log(`${MODULE_ID}: [ENRICHER] ${actionType.toUpperCase()} intercepted for ${targets.length} target(s)`);
 
     // Stop propagation to prevent Draw Steel's default handler
     event.preventDefault();
@@ -1240,13 +1229,13 @@ Hooks.once("ready", () => {
         return;
       }
 
-      console.log(`${MODULE_ID}: [ENRICHER] Message ID: ${messageId}, Speaker: ${message.speaker?.actor || 'none'}`);
+      console.log(`${MODULE_ID}: [ENRICHER] Message ID: ${messageId}`);
 
       // Determine targets: use targets first, fall back to selection
       const targetedTokens = Array.from(game.user.targets);
       const selectedTokens = Array.from(canvas.tokens.controlled || []);
 
-      console.log(`${MODULE_ID}: [ENRICHER] Targeted: ${targetedTokens.length}, Selected: ${selectedTokens.length}`);
+      console.log(`${MODULE_ID}: [ENRICHER] Targets: ${targets.length}`);
 
       let targets = targetedTokens;
       if (targets.length === 0) {
@@ -1264,7 +1253,7 @@ Hooks.once("ready", () => {
       const ownedTargets = targets.filter(t => t.isOwner);
       const nonOwnedTargets = targets.filter(t => !t.isOwner);
 
-      console.log(`${MODULE_ID}: [ENRICHER] Owned targets: ${ownedTargets.length}, Non-owned: ${nonOwnedTargets.length}`);
+      console.log(`${MODULE_ID}: [ENRICHER] Owned: ${ownedTargets.length}, Non-owned: ${nonOwnedTargets.length}`);
 
       if (nonOwnedTargets.length > 0) {
         console.log(`${MODULE_ID}: [ENRICHER] Non-owned targets: ${nonOwnedTargets.map(t => t.name).join(', ')}`);
@@ -1277,7 +1266,7 @@ Hooks.once("ready", () => {
         return;
       }
 
-      console.log(`${MODULE_ID}: [ENRICHER] Action data: type=${actionData.type}, amount=${actionData.amount}, damageType=${actionData.damageType || 'none'}`);
+      console.log(`${MODULE_ID}: [ENRICHER] Action: ${actionType}, amount=${actionData.amount}`);
 
       if (!socket) {
         console.error(`${MODULE_ID}: [ENRICHER] Socket not available`);
@@ -1290,22 +1279,15 @@ Hooks.once("ready", () => {
 
       for (const target of targets) {
         const isOwned = target.isOwner;
-        console.log(`${MODULE_ID}: [ENRICHER] Processing target: ${target.name} (owned: ${isOwned})`);
 
-        // Skip non-hero targets for gain actions
         if (actionType === 'gain' && !isHero(target.actor)) {
-          console.log(`${MODULE_ID}: [ENRICHER] Skipping non-hero target: ${target.name}`);
           skippedTargets.push(target.name);
           continue;
         }
 
         if (isOwned) {
-          // Apply directly (user owns the target)
-          console.log(`${MODULE_ID}: [ENRICHER] Applying ${actionType} directly to ${target.name}`);
           await applyActionDirectly(target, actionType, actionData, message);
         } else {
-          // Route through GM relay (user doesn't own the target)
-          console.log(`${MODULE_ID}: [ENRICHER] Routing ${actionType} via GM relay for ${target.name}`);
           await applyActionViaGMRelay(target, actionType, actionData, message);
         }
       }
@@ -1325,7 +1307,7 @@ Hooks.once("ready", () => {
         }
       }
 
-      console.log(`${MODULE_ID}: [ENRICHER] ${actionType.toUpperCase()} action complete for ${targets.length} target(s)`);
+      console.log(`${MODULE_ID}: [ENRICHER] ${actionType.toUpperCase()} complete`);
 
     } catch (error) {
       console.error(`${MODULE_ID}: [ENRICHER] Error:`, error);
@@ -1352,43 +1334,28 @@ async function extractEnricherActionData(button, message, actionType) {
       sourceItemName: null
     };
 
-    // Extract amount from button dataset or message
     if (button.dataset.amount) {
       data.amount = parseFloat(button.dataset.amount);
-      console.log(`${MODULE_ID}: [ENRICHER] Amount from button.dataset: ${data.amount}`);
     } else if (message.rolls?.[0]?.total) {
       data.amount = message.rolls[0].total;
-      console.log(`${MODULE_ID}: [ENRICHER] Amount from message roll: ${data.amount}`);
-    } else {
-      console.log(`${MODULE_ID}: [ENRICHER] No amount found in button or message`);
     }
 
-    // Extract damage/healing type
-    if (button.dataset.type) {
+    if (button.dataset.type && button.dataset.type !== 'gain') {
       data.damageType = button.dataset.type;
-      console.log(`${MODULE_ID}: [ENRICHER] Damage type from dataset: ${data.damageType}`);
     }
 
-    // Extract effect data for apply actions
     if (actionType === 'apply') {
-      // For status effects, data-status contains the status ID
-      // For custom effects, data-uuid contains the effect UUID
       data.effectUuid = button.dataset.uuid || button.dataset.status || button.dataset.effectId;
       data.effectName = button.textContent?.trim() || button.dataset.tooltip?.split('\n')[0] || 'Unknown Effect';
-      console.log(`${MODULE_ID}: [ENRICHER] Effect type: ${button.dataset.type}, UUID/Status: ${data.effectUuid}, Name: ${data.effectName}`);
     }
 
-    // Extract resource data for gain actions
     if (actionType === 'gain') {
       data.resourceType = button.dataset.resourceType || button.dataset.gainType || 'heroic';
       data.resourceAmount = parseFloat(button.dataset.amount) || parseFloat(button.dataset.formula) || 1;
-      console.log(`${MODULE_ID}: [ENRICHER] Resource type: ${data.resourceType}, Amount: ${data.resourceAmount}`);
     }
 
-    // Try to extract source info from message
     if (message.speaker?.actor) {
       data.sourceActorId = message.speaker.actor;
-      console.log(`${MODULE_ID}: [ENRICHER] Source actor ID: ${data.sourceActorId}`);
       if (message.speaker?.item) {
         data.sourceItemId = message.speaker.item;
         const sourceActor = game.actors.get(message.speaker.actor);
@@ -1396,13 +1363,11 @@ async function extractEnricherActionData(button, message, actionType) {
           const sourceItem = sourceActor.items.get(message.speaker.item);
           if (sourceItem) {
             data.sourceItemName = sourceItem.name;
-            console.log(`${MODULE_ID}: [ENRICHER] Source item: ${data.sourceItemName}`);
           }
         }
       }
     }
 
-    console.log(`${MODULE_ID}: [ENRICHER] Extracted data:`, data);
     return data;
   } catch (error) {
     console.error(`${MODULE_ID}: [ENRICHER] Error extracting action data:`, error);
@@ -1416,24 +1381,18 @@ async function extractEnricherActionData(button, message, actionType) {
 async function applyActionDirectly(token, actionType, actionData, message) {
   const actor = token.actor;
   if (!actor) {
-    console.warn(`${MODULE_ID}: [ENRICHER] No actor found for token ${token.name}`);
+    console.warn(`${MODULE_ID}: [ENRICHER] No actor found for ${token.name}`);
     return;
   }
-
-  console.log(`${MODULE_ID}: [ENRICHER] Direct apply to ${token.name} (${actor.id}), type=${actionType}, amount=${actionData.amount}`);
 
   try {
     switch (actionType) {
       case 'damage':
         if (actionData.amount > 0) {
-          console.log(`${MODULE_ID}: [ENRICHER] Taking damage: ${actionData.amount} ${actionData.damageType || 'untyped'}`);
           await actor.system.takeDamage(actionData.amount, {
             type: actionData.damageType || 'untyped'
           });
-          console.log(`${MODULE_ID}: [ENRICHER] Damage applied successfully to ${token.name}`);
           ui.notifications.info(`Applied ${actionData.amount} damage to ${token.name}`);
-        } else {
-          console.warn(`${MODULE_ID}: [ENRICHER] No damage amount to apply`);
         }
         break;
 
@@ -1442,53 +1401,35 @@ async function applyActionDirectly(token, actionType, actionData, message) {
           const currentValue = actor.system.stamina?.value || 0;
           const maxValue = actor.system.stamina?.max || 0;
           const healAmount = Math.min(actionData.amount, maxValue - currentValue);
-          console.log(`${MODULE_ID}: [ENRICHER] Healing: ${actionData.amount}, current=${currentValue}, max=${maxValue}, actual=${healAmount}`);
           if (healAmount > 0) {
             await actor.update({
               'system.stamina.value': currentValue + healAmount
             });
-            console.log(`${MODULE_ID}: [ENRICHER] Healing applied successfully to ${token.name}`);
             ui.notifications.info(`Healed ${token.name} for ${healAmount}`);
-          } else {
-            console.log(`${MODULE_ID}: [ENRICHER] No healing needed for ${token.name} (at max stamina)`);
           }
         }
         break;
 
       case 'apply':
         if (!actionData.effectUuid) {
-          console.warn(`${MODULE_ID}: [ENRICHER] No effect UUID or status provided`);
           break;
         }
 
-        console.log(`${MODULE_ID}: [ENRICHER] Applying effect: ${actionData.effectUuid} (${actionData.effectName})`);
-
         try {
-          // Check if it's a status effect (from CONFIG.statusEffects) or a custom effect (UUID)
           const statusEffect = CONFIG.statusEffects?.find(s => s.id === actionData.effectUuid);
 
           if (statusEffect) {
-            // It's a canonical status effect
-            console.log(`${MODULE_ID}: [ENRICHER] Applying status effect: ${statusEffect.name}`);
             await actor.toggleStatusEffect(actionData.effectUuid, { active: true, overlay: false });
-            console.log(`${MODULE_ID}: [ENRICHER] Status effect applied successfully`);
             ui.notifications.info(`Applied ${actionData.effectName} to ${token.name}`);
           } else {
-            // Try to load as a custom effect UUID
             const effect = await fromUuid(actionData.effectUuid);
             if (effect) {
-              console.log(`${MODULE_ID}: [ENRICHER] Custom effect loaded: ${effect.name}`);
-              // Remove disabled existing effects with same ID
               const existing = actor.effects.get(effect.id);
               if (existing?.disabled) {
-                console.log(`${MODULE_ID}: [ENRICHER] Removing disabled existing effect`);
                 await existing.delete();
               }
               const result = await actor.createEmbeddedDocuments("ActiveEffect", [effect.toObject()]);
-              console.log(`${MODULE_ID}: [ENRICHER] Effect created: ${result[0]?.id}`);
               ui.notifications.info(`Applied ${actionData.effectName} to ${token.name}`);
-            } else {
-              console.warn(`${MODULE_ID}: [ENRICHER] Effect not found: ${actionData.effectUuid}`);
             }
           }
         } catch (e) {
@@ -1497,23 +1438,18 @@ async function applyActionDirectly(token, actionType, actionData, message) {
         break;
 
       case 'gain':
-        // Handle resource gain - depends on Draw Steel's resource system
         const resourceField = getResourceField(actor, actionData.resourceType);
         if (resourceField) {
-          const currentValue = getProperty(actor.system, resourceField.path) || 0;
-          console.log(`${MODULE_ID}: [ENRICHER] Resource gain: ${actionData.resourceType}, adding ${actionData.resourceAmount} (current=${currentValue})`);
-          await actor.update({
-            [resourceField.path]: currentValue + actionData.resourceAmount
-          });
-          console.log(`${MODULE_ID}: [ENRICHER] Resource gained successfully for ${token.name}`);
+          const currentValue = getProperty(actor.system, resourceField.path) ?? 0;
+          await actor.modifyTokenAttribute(resourceField.path, actionData.resourceAmount, true, false);
           ui.notifications.info(`Gained ${actionData.resourceAmount} ${actionData.resourceType} for ${token.name}`);
         } else {
-          console.warn(`${MODULE_ID}: [ENRICHER] Unknown resource type: ${actionData.resourceType}`);
+          console.warn(`${MODULE_ID}: [ENRICHER] Unknown resource: ${actionData.resourceType}`);
         }
         break;
     }
   } catch (error) {
-    console.error(`${MODULE_ID}: [ENRICHER] Error applying action directly to ${token.name}:`, error);
+    console.error(`${MODULE_ID}: [ENRICHER] Error on ${token.name}:`, error);
   }
 }
 
@@ -1522,18 +1458,15 @@ async function applyActionDirectly(token, actionType, actionData, message) {
  */
 async function applyActionViaGMRelay(token, actionType, actionData, message) {
   if (!socket) {
-    console.warn(`${MODULE_ID}: [ENRICHER] No socket available for GM relay`);
     return;
   }
 
   const eventId = `enricher-${actionType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  console.log(`${MODULE_ID}: [ENRICHER] GM relay request: ${actionType} to ${token.name}, eventId=${eventId}`);
 
   try {
     switch (actionType) {
       case 'damage':
       case 'heal':
-        console.log(`${MODULE_ID}: [ENRICHER] Sending ${actionType} request via GM relay: amount=${actionData.amount}, type=${actionData.damageType || 'untyped'}`);
         const result = await socket.executeAsGM('applyDamageToTarget', {
           tokenId: token.id,
           amount: actionData.amount,
@@ -1544,16 +1477,12 @@ async function applyActionViaGMRelay(token, actionType, actionData, message) {
           sourceItemId: actionData.sourceItemId,
           eventId: eventId
         });
-        console.log(`${MODULE_ID}: [ENRICHER] GM relay result for ${token.name}:`, result);
         if (result.success) {
           ui.notifications.info(`${actionType === 'heal' ? 'Healed' : 'Damaged'} ${token.name} for ${actionData.amount}`);
-        } else {
-          console.warn(`${MODULE_ID}: [ENRICHER] GM relay failed: ${result.error}`);
         }
         break;
 
       case 'apply':
-        console.log(`${MODULE_ID}: [ENRICHER] Sending apply effect request via GM relay: ${actionData.effectName}`);
         const applyResult = await socket.executeAsGM('applyStatusToTarget', {
           tokenId: token.id,
           statusName: actionData.effectName,
@@ -1567,16 +1496,12 @@ async function applyActionViaGMRelay(token, actionType, actionData, message) {
           timestamp: Date.now(),
           duration: null
         });
-        console.log(`${MODULE_ID}: [ENRICHER] GM relay apply result for ${token.name}:`, applyResult);
         if (applyResult.success) {
           ui.notifications.info(`Applied ${actionData.effectName} to ${token.name}`);
-        } else {
-          console.warn(`${MODULE_ID}: [ENRICHER] GM relay apply failed: ${applyResult.error}`);
         }
         break;
 
       case 'gain':
-        console.log(`${MODULE_ID}: [ENRICHER] Sending resource gain via GM relay: ${actionData.resourceType} x${actionData.resourceAmount}`);
         const gainResult = await socket.executeAsGM('applyResourceGain', {
           tokenId: token.id,
           resourceType: actionData.resourceType,
@@ -1584,17 +1509,13 @@ async function applyActionViaGMRelay(token, actionType, actionData, message) {
           sourcePlayerName: game.user.name,
           eventId: eventId
         });
-        console.log(`${MODULE_ID}: [ENRICHER] GM relay gain result for ${token.name}:`, gainResult);
         if (gainResult.success) {
           ui.notifications.info(`Gained ${actionData.resourceAmount} ${actionData.resourceType} for ${token.name}`);
-        } else {
-          console.warn(`${MODULE_ID}: [ENRICHER] GM relay gain failed: ${gainResult.error}`);
         }
         break;
     }
   } catch (error) {
-    console.error(`${MODULE_ID}: [ENRICHER] Error in GM relay for ${token.name}:`, error);
-    ui.notifications.error(`Failed to apply ${actionType}: ${error.message}`);
+    console.error(`${MODULE_ID}: [ENRICHER] GM relay error:`, error);
   }
 }
 
@@ -1603,13 +1524,13 @@ async function applyActionViaGMRelay(token, actionType, actionData, message) {
  */
 function getResourceField(actor, resourceType) {
   const resourceMap = {
-    'heroic': { path: 'resources.heroic.value' },
-    'epic': { path: 'resources.epic.value' },
-    'surge': { path: 'resources.surge.value' },
-    'progression': { path: 'resources.progression.value' },
-    'renown': { path: 'resources.renown.value' },
-    'wealth': { path: 'resources.wealth.value' },
-    'victory': { path: 'resources.victory.value' }
+    'heroic': { path: 'hero.primary.value' },
+    'epic': { path: 'hero.epic.value' },
+    'surge': { path: 'hero.surges' },
+    'progression': { path: 'hero.xp' },
+    'renown': { path: 'hero.renown' },
+    'wealth': { path: 'hero.wealth' },
+    'victory': { path: 'hero.victories' }
   };
 
   return resourceMap[resourceType.toLowerCase()] || null;
@@ -1619,44 +1540,30 @@ function getResourceField(actor, resourceType) {
  * GM handler: Apply resource gain to a target
  */
 async function handleGMResourceGain({ tokenId, resourceType, amount, sourcePlayerName, eventId }) {
-  console.log(`${MODULE_ID}: [GM] Received applyResourceGain request: tokenId=${tokenId}, type=${resourceType}, amount=${amount}, from=${sourcePlayerName}`);
-
   if (!game.user.isGM) {
-    console.warn(`${MODULE_ID}: [GM] Unauthorized resource gain attempt`);
     return { success: false, error: "Unauthorized" };
   }
 
   try {
     const token = canvas.tokens.get(tokenId);
     if (!token) {
-      console.warn(`${MODULE_ID}: [GM] Token not found: ${tokenId}`);
       return { success: false, error: "Token not found" };
     }
 
     const actor = token.actor;
     if (!actor) {
-      console.warn(`${MODULE_ID}: [GM] Actor not found for token: ${tokenId}`);
       return { success: false, error: "Actor not found" };
     }
 
-    console.log(`${MODULE_ID}: [GM] Processing resource gain for ${actor.name}`);
-
     const field = getResourceField(actor, resourceType);
     if (!field) {
-      console.warn(`${MODULE_ID}: [GM] Unknown resource type: ${resourceType}`);
-      return { success: false, error: `Unknown resource type: ${resourceType}` };
+      return { success: false, error: `Unknown resource: ${resourceType}` };
     }
 
-    const currentValue = getProperty(actor.system, field.path) || 0;
-    console.log(`${MODULE_ID}: [GM] Current ${resourceType}: ${currentValue}, adding ${amount}`);
-
-    await actor.update({
-      [field.path]: currentValue + amount
-    });
+    const currentValue = getProperty(actor.system, field.path) ?? 0;
+    await actor.modifyTokenAttribute(field.path, amount, true, false);
 
     const newValue = getProperty(actor.system, field.path);
-    console.log(`${MODULE_ID}: [GM] Success: ${actor.name} now has ${newValue} ${resourceType} (was ${currentValue})`);
-
     return { success: true, resourceType, amount, tokenName: token.name, newValue };
   } catch (error) {
     console.error(`${MODULE_ID}: [GM] Resource gain error:`, error);
