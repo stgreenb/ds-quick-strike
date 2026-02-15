@@ -16,7 +16,20 @@ Foundry, by default, prevents players from applying damage tokens they don't own
 
 * SocketLib
 * A GM must be logged in
-* Optional: [ds-aa-bridge.](https://github.com/stgreenb/ds-aa-bridge) - To add animations. 
+* Draw Steel 0.10.0+ (for v2.x) or Draw Steel 0.9.x (for v1.8.1)
+* Optional: [ds-aa-bridge](https://github.com/stgreenb/ds-aa-bridge) - To add animations.
+
+## Supported Draw Steel Enrichers
+
+| Enricher | Hooked | Notes |
+|----------|--------|-------|
+| `[[/damage]]` | ✅ | Routes through GM relay for unowned tokens |
+| `[[/heal]]` | ✅ | Includes temporary stamina (uses higher of current/new) |
+| `[[/apply]]` | ✅ | Status effects via GM relay |
+| `[[/surge]]` | ❌ | Native DS handler (applies to source) |
+| `[[/gain]]` | ❌ | Native DS handler |
+
+**Note:** `[[/surge]]` and `[[/gain]]` may be hooked in a future version to fix target routing.
 
 ## Settings
 

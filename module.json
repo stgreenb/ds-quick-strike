@@ -2,7 +2,7 @@
   "id": "ds-quick-strike",
   "title": "Draw Steel Quick Strike",
   "description": "Damage redirection, status application, and logging for Draw Steel system with GM relay and animation hook support",
-  "version": "1.8.1",
+  "version": "2.0.0",
   "authors": [
     {
       "name": "Draw Steel Community",
@@ -10,12 +10,12 @@
     }
   ],
   "compatibility": {
-    "minimum": "11",
+    "minimum": "13",
     "verified": "13"
   },
   "url": "https://github.com/stgreenb/ds-quick-strike",
-  "manifest": "https://raw.githubusercontent.com/stgreenb/ds-quick-strike/develop/module.json",
-  "download": "https://raw.githubusercontent.com/stgreenb/ds-quick-strike/develop/ds-quick-strike-develop-v1.6.6.zip",
+  "manifest": "https://raw.githubusercontent.com/stgreenb/ds-quick-strike/compat/draw-steel-0.10/module.json",
+  "download": "https://github.com/stgreenb/ds-quick-strike/releases/download/v2.0.0-pre-ds0.10/ds-quick-strike-v2.0.0.zip",
   "socket": true,
   "relationships": {
     "requires": [
@@ -25,6 +25,15 @@
         "manifest": "https://github.com/farling42/foundryvtt-socketlib/releases/latest/download/module.json",
         "compatibility": {
           "minimum": "10.0"
+        }
+      }
+    ],
+    "systems": [
+      {
+        "id": "draw-steel",
+        "type": "system",
+        "compatibility": {
+          "minimum": "0.10.0"
         }
       }
     ]

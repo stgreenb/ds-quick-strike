@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0-pre-ds0.10] - 2025-02-15
+
+### Added
+- **Draw Steel 0.10.0 Compatibility**: Full support for Draw Steel 0.10.0's new chat parts system
+- **applyEffect Override**: New handler for 0.10.0's `data-action="applyEffect"` status buttons
+- **Target Resolution**: Uses `message.system.targetTokens` with fallback to `game.user.targets`
+
+### Changed
+- **Temporary Stamina**: Now uses `Math.max(current, amount)` instead of additive (per Draw Steel rules)
+- **Damage Callback**: Updated to handle 0.10.0's `data-message-part` attribute for roll retrieval
+
+### Known Issues
+- Cosmetic permission errors on non-GM clients when status effects applied (Draw Steel bug: [#1640](https://github.com/MetaMorphic-Digital/draw-steel/issues/1640))
+- `[[/surge]]` and `[[/gain]]` enrichers apply to source actor, not target
+
+### Breaking Changes
+- **Requires Draw Steel 0.10.0+** - Not compatible with 0.9.x
+- For 0.9.x compatibility, use v1.8.1
+
 ## [1.8.1] - 2025-12-27
 
 ### Fixed

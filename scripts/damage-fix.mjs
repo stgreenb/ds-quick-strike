@@ -5,17 +5,6 @@ let damageHistory = [];
 const originalTakeDamageMap = new Map();
 
 /**
- * Get Draw Steel system version info
- * @returns {{ version: string, isPartsSystem: boolean }}
- */
-function getDrawSteelVersion() {
-  const version = game.system?.version || '0.0.0';
-  const parts = version.split('.').map(Number);
-  const isPartsSystem = (parts[0] > 0) || (parts[0] === 0 && parts[1] >= 10);
-  return { version, isPartsSystem };
-}
-
-/**
  * Initialize when SocketLib is ready
  */
 Hooks.once('socketlib.ready', () => {
@@ -102,18 +91,15 @@ Hooks.once('ready', () => {
 function installApplyEffectOverride() {
   const AbilityResultPart = globalThis.ds?.data?.pseudoDocuments?.messageParts?.AbilityResult;
   if (!AbilityResultPart) {
-    console.log(`${MODULE_ID}: AbilityResultPart not found - skipping applyEffect override (pre-0.10.0)`);
     return;
   }
 
   const originalApplyEffect = AbilityResultPart.ACTIONS.applyEffect;
   if (!originalApplyEffect) {
-    console.log(`${MODULE_ID}: applyEffect action not found`);
     return;
   }
 
   AbilityResultPart.ACTIONS.applyEffect = async function(event, target) {
-    // Prevent native handler from running
     event.preventDefault();
     event.stopPropagation();
 
@@ -121,67 +107,43 @@ function installApplyEffectOverride() {
     const effectUuid = target.dataset.uuid;
     const statusName = target.textContent.trim();
 
-    console.log(`${MODULE_ID}: applyEffect override triggered`);
-    console.log(`${MODULE_ID}:   statusId="${statusId}", statusName="${statusName}"`);
-
-    // Get targets from message
     const message = this.message;
     let targetTokens = [];
     
-    // Try to get targets from message storage (0.10.0)
-    console.log(`${MODULE_ID}:   message.system.targetTokens size: ${message.system?.targetTokens?.size || 0}`);
     if (message.system?.targetTokens?.size > 0) {
       const tokenDocs = Array.from(message.system.targetTokens);
-      console.log(`${MODULE_ID}:   Token docs from message:`, tokenDocs.map(d => d?.name));
       targetTokens = tokenDocs.map(doc => canvas.tokens.get(doc.id)).filter(t => t);
-      console.log(`${MODULE_ID}:   Resolved to placed tokens:`, targetTokens.map(t => t?.name));
     }
     
-    // Fallback to user's targeted tokens (not controlled)
     if (!targetTokens.length) {
-      console.log(`${MODULE_ID}:   Falling back to game.user.targets`);
       targetTokens = Array.from(game.user.targets);
     }
-
-    console.log(`${MODULE_ID}:   Final targetTokens:`, targetTokens.map(t => t?.name));
 
     if (!targetTokens.length) {
       ui.notifications.warn("Select a target to apply status");
       return;
     }
 
-    // Check if player owns all targets
     const ownedTokens = targetTokens.filter(t => t.actor?.isOwner);
     const unownedTokens = targetTokens.filter(t => !t.actor?.isOwner);
 
-    console.log(`${MODULE_ID}:   Owned tokens: ${ownedTokens.map(t => t.name)}, Unowned: ${unownedTokens.map(t => t.name)}`);
-
-    // If all tokens are owned, use original behavior
     if (unownedTokens.length === 0) {
-      console.log(`${MODULE_ID}:   All owned - using native handler`);
       return originalApplyEffect.call(this, event, target);
     }
 
-    console.log(`${MODULE_ID}:   Has unowned tokens - routing through GM relay`);
-
-    // For unowned tokens, route through GM relay
     if (!socket) {
       ui.notifications.error("Socket not available");
       return;
     }
 
-    // Check for GM
     const gmUser = game.users.find(u => u.isGM && u.active);
     if (!gmUser) {
       ui.notifications.warn("No GM available to apply status");
       return;
     }
 
-    // Apply to unowned tokens via GM relay
     for (const token of unownedTokens) {
       const abilityData = await extractAbilityDataFromMessage(message);
-      
-      console.log(`${MODULE_ID}:   Sending to GM: tokenId=${token.id}, statusName=${statusName}`);
       
       const result = await socket.executeAsGM("applyStatusToTarget", {
         tokenId: token.id,
@@ -197,8 +159,6 @@ function installApplyEffectOverride() {
         duration: abilityData?.duration || null
       });
 
-      console.log(`${MODULE_ID}:   GM result:`, result);
-
       if (result?.success) {
         ui.notifications.info(`Applied ${statusName} to ${token.name}`);
       } else {
@@ -206,10 +166,7 @@ function installApplyEffectOverride() {
       }
     }
 
-    // For owned tokens, use original handler
     if (ownedTokens.length > 0) {
-      console.log(`${MODULE_ID}:   Also applying to owned tokens via native handler`);
-      // Temporarily set controlled tokens to just the owned ones
       const originalControlled = canvas.tokens.controlled;
       canvas.tokens.controlled = ownedTokens;
       
@@ -220,8 +177,6 @@ function installApplyEffectOverride() {
       }
     }
   };
-
-  console.log(`${MODULE_ID}: Installed applyEffect override for 0.10.0`);
 }
 
 /**
@@ -298,7 +253,6 @@ function installDamageOverride() {
   const originalCallback = OriginalDamageRoll.applyDamageCallback;
 
   OriginalDamageRoll.applyDamageCallback = async function(event) {
-    console.log(`${MODULE_ID}: Damage button clicked`);
     try {
       const target = event.currentTarget;
       const li = target.closest("[data-message-id]");
@@ -309,22 +263,16 @@ function installDamageOverride() {
 
       const rollIndex = target.dataset.index;
       
-      console.log(`${MODULE_ID}:   messageId=${li.dataset.messageId}, rollIndex=${rollIndex}, shiftKey=${event.shiftKey}`);
-      
-      // Handle 0.10.0 parts system: check for data-message-part attribute
       const partElement = target.closest("[data-message-part]");
       let roll;
       if (partElement && message.system?.parts) {
         const partId = partElement.dataset.messagePart;
         const part = message.system.parts.get(partId);
-        console.log(`${MODULE_ID}:   Using parts system - partId=${partId}`);
         if (part && part.rolls) {
           roll = part.rolls[rollIndex];
         }
       }
-      // Fallback to direct rolls array (0.9.x compatibility)
       if (!roll) {
-        console.log(`${MODULE_ID}:   Falling back to message.rolls`);
         roll = message.rolls[rollIndex];
       }
       if (!roll) return;
@@ -333,7 +281,6 @@ function installDamageOverride() {
       const isHalf = event.shiftKey;
       if (isHalf) {
         amount = Math.floor(amount / 2);
-        console.log(`${MODULE_ID}:   Half damage: ${roll.total} -> ${amount}`);
       }
 
       const targets = Array.from(game.user.targets);
@@ -444,14 +391,11 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
  * Send damage request to GM via socket
  */
 async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName) {
-  console.log(`${MODULE_ID}: applyDamageViaSocket`);
-  console.log(`${MODULE_ID}:   targets: ${targets.map(t => t.name)}, amount: ${amount}, isHeal: ${roll.isHeal}`);
   try {
     for (const target of targets) {
       const eventId = `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
       if (roll.isHeal) {
-        console.log(`${MODULE_ID}:   Sending HEAL to GM: ${target.name} for ${amount}`);
         const result = await socket.executeAsGM('applyHealToTarget', {
           tokenId: target.id,
           amount: amount,
@@ -465,14 +409,11 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sour
         });
 
         if (result.success) {
-          console.log(`${MODULE_ID}:   HEAL success: ${target.name} healed for ${amount}`);
           ui.notifications.info(`Healed ${target.name} for ${amount}`);
         } else {
-          console.log(`${MODULE_ID}:   HEAL failed: ${result.error}`);
           ui.notifications.error(`Failed to heal ${target.name}: ${result.error}`);
         }
       } else {
-        console.log(`${MODULE_ID}:   Sending DAMAGE to GM: ${target.name} for ${amount} ${roll.type || 'untyped'}`);
         const result = await socket.executeAsGM('applyDamageToTarget', {
           tokenId: target.id,
           amount: amount,
@@ -487,10 +428,8 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sour
         });
 
         if (result.success) {
-          console.log(`${MODULE_ID}:   DAMAGE success: ${target.name} took ${amount} damage`);
           ui.notifications.info(`Damaged ${target.name} for ${amount}`);
         } else {
-          console.log(`${MODULE_ID}:   DAMAGE failed: ${result.error}`);
           ui.notifications.error(`Failed to damage ${target.name}: ${result.error}`);
         }
       }
@@ -642,19 +581,12 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
     const isTemp = type !== "value";
     const currentTemp = actor.system.stamina?.temporary || 0;
 
-    if (isTemp && amount > currentTemp) {
-      console.warn(`${MODULE_ID}: Temporary stamina capped for ${actor.name}`);
-    }
-
-    // Direct update to avoid modifyTokenAttribute string conversion issues
     if (isTemp) {
-      // Temporary stamina healing
-      const newTemp = Math.round(parseFloat(actor.system.stamina?.temporary || 0) + amount);
+      const newTemp = Math.max(currentTemp, amount);
       await actor.update({
         'system.stamina.temporary': newTemp
       });
     } else {
-      // Permanent stamina healing
       const newPerm = Math.round(parseFloat(actor.system.stamina?.value || 0) + amount);
       const max = actor.system?.stamina?.max || 0;
       const boundedPerm = Math.min(newPerm, max);
@@ -1462,15 +1394,11 @@ async function handleGMApplyStatus({
       try {
         const effectDoc = await fromUuid(statusUuid);
         if (effectDoc && typeof effectDoc.applyEffect === 'function') {
-          // Get the tier from the effect document
           const tier = effectDoc.tier || effectDoc.parent?.tier || 3;
           const tierKey = `tier${tier}`;
           
-          console.log(`${MODULE_ID}: Using native applyEffect for ${statusName} via ${statusUuid}`);
-          
           await effectDoc.applyEffect(tierKey, statusId, { targets: [actor] });
           
-          // Success - skip our manual handling
           return { success: true, statusName: statusName };
         }
       } catch (nativeError) {

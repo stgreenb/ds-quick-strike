@@ -76,3 +76,8 @@ ds-quick-strike.zip
 # Distribution files
 *.zip
 ds-animations-guide.md
+
+# Test files
+fvtt-Actor-*.json
+ds-quick-strike-test/
+nul
