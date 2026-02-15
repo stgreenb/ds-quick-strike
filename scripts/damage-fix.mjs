@@ -1192,11 +1192,8 @@ Hooks.once("ready", () => {
     // Apply effect - Draw Steel uses <a> tags with data-type="status" or "custom"
     const applyBtn = clickedEl.closest('a[data-type="status"], a[data-type="custom"]');
 
-    // Gain buttons
-    const gainBtn = clickedEl.closest('[data-type="gain"], [data-action="gain"], [data-enricher*="gain"], .gain-link');
-
-    // Combine all enricher elements
-    const enricherBtn = damageBtn || healBtn || applyBtn || gainBtn;
+    // Combine enricher elements (gain buttons use native DS handler)
+    const enricherBtn = damageBtn || healBtn || applyBtn;
 
     // Debug: log clicks on roll-links (enricher class name)
     if (!enricherBtn && clickedEl.closest('.roll-link')) {
@@ -1214,7 +1211,6 @@ Hooks.once("ready", () => {
     let actionType = 'damage';
     if (healBtn) actionType = 'heal';
     else if (applyBtn) actionType = 'apply';
-    else if (gainBtn) actionType = 'gain';
 
     console.log(`${MODULE_ID}: [ENRICHER] ${actionType.toUpperCase()} intercepted`);
     console.log(`${MODULE_ID}: [ENRICHER] Tag: ${enricherBtn.tagName}, class: ${enricherBtn.className}, text: "${enricherBtn.textContent?.trim()}"`);
