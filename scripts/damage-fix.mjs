@@ -1098,7 +1098,9 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 Hooks.once("ready", () => {
   
   document.addEventListener("click", async (event) => {
-    const statusBtn = event.target.closest('button[data-type="status"]');
+    // 0.10.0: buttons use data-action="applyEffect"
+    // 0.9.x: buttons use data-type="status"
+    const statusBtn = event.target.closest('button[data-action="applyEffect"], button[data-type="status"]');
     if (!statusBtn) return;
 
     event.preventDefault();
@@ -1113,14 +1115,23 @@ Hooks.once("ready", () => {
       const message = game.messages.get(messageId);
       if (!message) throw new Error("Message not found: " + messageId);
 
-      const statusId = statusBtn.dataset.effectId;
+      const statusId = statusBtn.dataset.effectId || statusBtn.dataset.status;
       const statusName = statusBtn.textContent.trim();
       const effectUuid = statusBtn.dataset.uuid;
 
       console.log(`${MODULE_ID}: Status button clicked - statusId="${statusId}", statusName="${statusName}"`);
+      console.log(`${MODULE_ID}: Button data attributes:`, { 
+        action: statusBtn.dataset.action,
+        effectId: statusBtn.dataset.effectId,
+        type: statusBtn.dataset.type,
+        uuid: statusBtn.dataset.uuid 
+      });
 
       // Get targets from message (0.10.0+) or fall back to user's current targets (0.9.x)
       let targets = [];
+      console.log(`${MODULE_ID}: message.system:`, message.system);
+      console.log(`${MODULE_ID}: message.system?.targetActors:`, message.system?.targetActors);
+      console.log(`${MODULE_ID}: message.system?.targets:`, message.system?.targets);
       if (message.system?.targetActors) {
         console.log(`${MODULE_ID}: Using message.system.targetActors (0.10.0)`);
         const actors = Array.from(message.system.targetActors);
