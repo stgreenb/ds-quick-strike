@@ -25,6 +25,12 @@ jobs:
           # Remove 'v' prefix if present
           VERSION=${TAG_NAME#v}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          # Check if this is a pre-release
+          if [[ "$VERSION" == *"pre"* ]] || [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"alpha"* ]]; then
+            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+          else
+            echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+          fi
 
       - name: Create distribution directory
         run: |
@@ -92,7 +98,7 @@ jobs:
             3. Click **Install**
 
           draft: false
-          prerelease: false
+          prerelease: ${{ env.IS_PRERELEASE }}
           files: |
             ds-quick-strike/module.json
             ds-quick-strike-${{ env.VERSION }}.zip
