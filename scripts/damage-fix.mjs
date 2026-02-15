@@ -298,6 +298,7 @@ function installDamageOverride() {
   const originalCallback = OriginalDamageRoll.applyDamageCallback;
 
   OriginalDamageRoll.applyDamageCallback = async function(event) {
+    console.log(`${MODULE_ID}: Damage button clicked`);
     try {
       const target = event.currentTarget;
       const li = target.closest("[data-message-id]");
@@ -308,25 +309,31 @@ function installDamageOverride() {
 
       const rollIndex = target.dataset.index;
       
+      console.log(`${MODULE_ID}:   messageId=${li.dataset.messageId}, rollIndex=${rollIndex}, shiftKey=${event.shiftKey}`);
+      
       // Handle 0.10.0 parts system: check for data-message-part attribute
       const partElement = target.closest("[data-message-part]");
       let roll;
       if (partElement && message.system?.parts) {
         const partId = partElement.dataset.messagePart;
         const part = message.system.parts.get(partId);
+        console.log(`${MODULE_ID}:   Using parts system - partId=${partId}`);
         if (part && part.rolls) {
           roll = part.rolls[rollIndex];
         }
       }
       // Fallback to direct rolls array (0.9.x compatibility)
       if (!roll) {
+        console.log(`${MODULE_ID}:   Falling back to message.rolls`);
         roll = message.rolls[rollIndex];
       }
       if (!roll) return;
 
       let amount = roll.total;
-      if (event.shiftKey) {
+      const isHalf = event.shiftKey;
+      if (isHalf) {
         amount = Math.floor(amount / 2);
+        console.log(`${MODULE_ID}:   Half damage: ${roll.total} -> ${amount}`);
       }
 
       const targets = Array.from(game.user.targets);
@@ -437,11 +444,14 @@ async function checkForSelfDamage(targets, amount, isHeal, moduleId) {
  * Send damage request to GM via socket
  */
 async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sourceActorId, sourceItemName) {
+  console.log(`${MODULE_ID}: applyDamageViaSocket`);
+  console.log(`${MODULE_ID}:   targets: ${targets.map(t => t.name)}, amount: ${amount}, isHeal: ${roll.isHeal}`);
   try {
     for (const target of targets) {
       const eventId = `damage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
       if (roll.isHeal) {
+        console.log(`${MODULE_ID}:   Sending HEAL to GM: ${target.name} for ${amount}`);
         const result = await socket.executeAsGM('applyHealToTarget', {
           tokenId: target.id,
           amount: amount,
@@ -455,11 +465,14 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sour
         });
 
         if (result.success) {
+          console.log(`${MODULE_ID}:   HEAL success: ${target.name} healed for ${amount}`);
           ui.notifications.info(`Healed ${target.name} for ${amount}`);
         } else {
+          console.log(`${MODULE_ID}:   HEAL failed: ${result.error}`);
           ui.notifications.error(`Failed to heal ${target.name}: ${result.error}`);
         }
       } else {
+        console.log(`${MODULE_ID}:   Sending DAMAGE to GM: ${target.name} for ${amount} ${roll.type || 'untyped'}`);
         const result = await socket.executeAsGM('applyDamageToTarget', {
           tokenId: target.id,
           amount: amount,
@@ -474,8 +487,10 @@ async function applyDamageViaSocket(targets, roll, amount, sourceActorName, sour
         });
 
         if (result.success) {
+          console.log(`${MODULE_ID}:   DAMAGE success: ${target.name} took ${amount} damage`);
           ui.notifications.info(`Damaged ${target.name} for ${amount}`);
         } else {
+          console.log(`${MODULE_ID}:   DAMAGE failed: ${result.error}`);
           ui.notifications.error(`Failed to damage ${target.name}: ${result.error}`);
         }
       }
