@@ -102,11 +102,13 @@ Hooks.once('ready', () => {
 function installApplyEffectOverride() {
   const AbilityResultPart = globalThis.ds?.data?.pseudoDocuments?.messageParts?.AbilityResult;
   if (!AbilityResultPart) {
+    console.log(`${MODULE_ID}: AbilityResultPart not found - skipping applyEffect override (pre-0.10.0)`);
     return;
   }
 
   const originalApplyEffect = AbilityResultPart.ACTIONS.applyEffect;
   if (!originalApplyEffect) {
+    console.log(`${MODULE_ID}: applyEffect action not found`);
     return;
   }
 
@@ -115,20 +117,29 @@ function installApplyEffectOverride() {
     const effectUuid = target.dataset.uuid;
     const statusName = target.textContent.trim();
 
+    console.log(`${MODULE_ID}: applyEffect override triggered`);
+    console.log(`${MODULE_ID}:   statusId="${statusId}", statusName="${statusName}"`);
+
     // Get targets from message
     const message = this.message;
     let targetTokens = [];
     
     // Try to get targets from message storage (0.10.0)
+    console.log(`${MODULE_ID}:   message.system.targetTokens size: ${message.system?.targetTokens?.size || 0}`);
     if (message.system?.targetTokens?.size > 0) {
       const tokenDocs = Array.from(message.system.targetTokens);
+      console.log(`${MODULE_ID}:   Token docs from message:`, tokenDocs.map(d => d?.name));
       targetTokens = tokenDocs.map(doc => canvas.tokens.get(doc.id)).filter(t => t);
+      console.log(`${MODULE_ID}:   Resolved to placed tokens:`, targetTokens.map(t => t?.name));
     }
     
     // Fallback to user's targeted tokens (not controlled)
     if (!targetTokens.length) {
+      console.log(`${MODULE_ID}:   Falling back to game.user.targets`);
       targetTokens = Array.from(game.user.targets);
     }
+
+    console.log(`${MODULE_ID}:   Final targetTokens:`, targetTokens.map(t => t?.name));
 
     if (!targetTokens.length) {
       ui.notifications.warn("Select a target to apply status");
@@ -139,10 +150,15 @@ function installApplyEffectOverride() {
     const ownedTokens = targetTokens.filter(t => t.actor?.isOwner);
     const unownedTokens = targetTokens.filter(t => !t.actor?.isOwner);
 
+    console.log(`${MODULE_ID}:   Owned tokens: ${ownedTokens.map(t => t.name)}, Unowned: ${unownedTokens.map(t => t.name)}`);
+
     // If all tokens are owned, use original behavior
     if (unownedTokens.length === 0) {
+      console.log(`${MODULE_ID}:   All owned - using native handler`);
       return originalApplyEffect.call(this, event, target);
     }
+
+    console.log(`${MODULE_ID}:   Has unowned tokens - routing through GM relay`);
 
     // For unowned tokens, route through GM relay
     if (!socket) {
@@ -161,6 +177,8 @@ function installApplyEffectOverride() {
     for (const token of unownedTokens) {
       const abilityData = await extractAbilityDataFromMessage(message);
       
+      console.log(`${MODULE_ID}:   Sending to GM: tokenId=${token.id}, statusName=${statusName}`);
+      
       const result = await socket.executeAsGM("applyStatusToTarget", {
         tokenId: token.id,
         statusName,
@@ -175,6 +193,8 @@ function installApplyEffectOverride() {
         duration: abilityData?.duration || null
       });
 
+      console.log(`${MODULE_ID}:   GM result:`, result);
+
       if (result?.success) {
         ui.notifications.info(`Applied ${statusName} to ${token.name}`);
       } else {
@@ -184,6 +204,7 @@ function installApplyEffectOverride() {
 
     // For owned tokens, use original handler
     if (ownedTokens.length > 0) {
+      console.log(`${MODULE_ID}:   Also applying to owned tokens via native handler`);
       // Temporarily set controlled tokens to just the owned ones
       const originalControlled = canvas.tokens.controlled;
       canvas.tokens.controlled = ownedTokens;
@@ -195,6 +216,8 @@ function installApplyEffectOverride() {
       }
     }
   };
+
+  console.log(`${MODULE_ID}: Installed applyEffect override for 0.10.0`);
 }
 
 /**
