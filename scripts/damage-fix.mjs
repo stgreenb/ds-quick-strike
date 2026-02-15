@@ -5,13 +5,24 @@ let damageHistory = [];
 const originalTakeDamageMap = new Map();
 
 /**
+ * Get Draw Steel system version info
+ * @returns {{ version: string, isPartsSystem: boolean }}
+ */
+function getDrawSteelVersion() {
+  const version = game.system?.version || '0.0.0';
+  const parts = version.split('.').map(Number);
+  const isPartsSystem = (parts[0] > 0) || (parts[0] === 0 && parts[1] >= 10);
+  return { version, isPartsSystem };
+}
+
+/**
  * Initialize when SocketLib is ready
  */
 Hooks.once('socketlib.ready', () => {
   try {
     socket = socketlib.registerModule(MODULE_ID);
 
-    // ✅ Wrapped handlers with type coercion (Layer 1: Socket Handler Wrapper)
+    // Wrapped handlers with type coercion
     socket.register('applyDamageToTarget', async (data) => {
       // Ensure amount is coerced to integer
       if (typeof data.amount === 'string') {
@@ -109,7 +120,7 @@ function wrapActorTakeDamage(actor) {
   originalTakeDamageMap.set(actor.id, originalTakeDamage);
 
   actor.system.takeDamage = async function(amount, options = {}) {
-    // ✅ Layer 3: Actor method guard (BELT & SUSPENDERS)
+    // Actor method guard
     amount = Math.round(parseFloat(amount) || 0);
 
     const preStamina = getStaminaSnapshot(actor);
@@ -159,14 +170,29 @@ function installDamageOverride() {
 
   OriginalDamageRoll.applyDamageCallback = async function(event) {
     try {
-      const li = event.currentTarget.closest("[data-message-id]");
+      const target = event.currentTarget;
+      const li = target.closest("[data-message-id]");
       if (!li) return;
 
       const message = game.messages.get(li.dataset.messageId);
       if (!message) return;
 
-      const rollIndex = event.currentTarget.dataset.index;
-      const roll = message.rolls[rollIndex];
+      const rollIndex = target.dataset.index;
+      
+      // Handle 0.10.0 parts system: check for data-message-part attribute
+      const partElement = target.closest("[data-message-part]");
+      let roll;
+      if (partElement && message.system?.parts) {
+        const partId = partElement.dataset.messagePart;
+        const part = message.system.parts.get(partId);
+        if (part && part.rolls) {
+          roll = part.rolls[rollIndex];
+        }
+      }
+      // Fallback to direct rolls array (0.9.x compatibility)
+      if (!roll) {
+        roll = message.rolls[rollIndex];
+      }
       if (!roll) return;
 
       let amount = roll.total;
@@ -196,14 +222,25 @@ function installDamageOverride() {
             if (sourceItem) {
               sourceItemName = sourceItem.name;
             }
-          } else if (message.system?.uuid) {
-            try {
-              const sourceItem = await fromUuid(message.system.uuid);
-              if (sourceItem) {
-                sourceItemName = sourceItem.name;
+          } else {
+            // Try to get item UUID from 0.10.0 parts system
+            let itemUuid = message.system?.uuid;
+            if (!itemUuid && partElement && message.system?.parts) {
+              const partId = partElement.dataset.messagePart;
+              const part = message.system.parts.get(partId);
+              if (part?.abilityUuid) {
+                itemUuid = part.abilityUuid;
               }
-            } catch (e) {
-              console.warn(`${MODULE_ID}: Could not load item from UUID: ${message.system.uuid}`, e);
+            }
+            if (itemUuid) {
+              try {
+                const sourceItem = await fromUuid(itemUuid);
+                if (sourceItem) {
+                  sourceItemName = sourceItem.name;
+                }
+              } catch (e) {
+                console.warn(`${MODULE_ID}: Could not load item from UUID: ${itemUuid}`, e);
+              }
             }
           }
         }
@@ -367,7 +404,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
     return { success: false, error: "Unauthorized" };
   }
 
-  // ✅ Layer 2: Handler-level validation (DEFENSIVE)
+  // Handler-level validation
   amount = Math.round(parseFloat(amount) || 0);
   if (isNaN(amount)) {
     console.error(`${MODULE_ID}: Invalid damage amount: ${amount}`);
@@ -438,7 +475,7 @@ async function handleGMHealApplication({ tokenId, amount, type, sourceActorName,
     return { success: false, error: "Unauthorized" };
   }
 
-  // ✅ Layer 2: Handler-level validation (DEFENSIVE)
+  // Handler-level validation
   amount = Math.round(parseFloat(amount) || 0);
   if (isNaN(amount)) {
     console.error(`${MODULE_ID}: Invalid healing amount: ${amount}`);
@@ -788,7 +825,9 @@ async function extractAbilityDataFromMessage(message) {
 
     if (messageElement) {
       // Look for ability name in the message
-      const abilityHeading = messageElement.querySelector('.message-content h5');
+      // 0.10.0: ability name is in <h5> inside <document-embed class="draw-steel ability">
+      // 0.9.x: ability name is in <h5> inside .message-content
+      const abilityHeading = messageElement.querySelector('document-embed.ability h5, .message-content h5, h5');
       if (abilityHeading) {
         abilityName = abilityHeading.textContent.trim();
       } else {
