@@ -51,7 +51,6 @@ Hooks.once('socketlib.ready', () => {
     socket.register('applyStatusToTarget', handleGMApplyStatus);
     socket.register('undoStatusApplication', handleGMUndoStatus);
     console.log(`${MODULE_ID}: SocketLib registered successfully`);
-    console.log(`${MODULE_ID}: Version 2026-02-15-b - Draw Steel ${game.system?.version} detected`);
   } catch (error) {
     console.error(`${MODULE_ID}: Failed to register socketlib:`, error);
   }
@@ -91,10 +90,114 @@ Hooks.once('ready', () => {
     }
 
     installDamageOverride();
+    installApplyEffectOverride();
   };
 
   waitForDependencies();
 });
+
+/**
+ * Override Draw Steel 0.10.0 applyEffect action to route through GM relay
+ */
+function installApplyEffectOverride() {
+  const AbilityResultPart = globalThis.ds?.data?.pseudoDocuments?.messageParts?.AbilityResult;
+  if (!AbilityResultPart) {
+    return;
+  }
+
+  const originalApplyEffect = AbilityResultPart.ACTIONS.applyEffect;
+  if (!originalApplyEffect) {
+    return;
+  }
+
+  AbilityResultPart.ACTIONS.applyEffect = async function(event, target) {
+    const statusId = target.dataset.effectId;
+    const effectUuid = target.dataset.uuid;
+    const statusName = target.textContent.trim();
+
+    // Get targets from message
+    const message = this.message;
+    let targetTokens = [];
+    
+    // Try to get targets from message storage (0.10.0)
+    if (message.system?.targetTokens?.size > 0) {
+      targetTokens = Array.from(message.system.targetTokens);
+    }
+    
+    // Fallback to current selection
+    if (!targetTokens.length) {
+      targetTokens = Array.from(canvas.tokens.controlled);
+    }
+
+    if (!targetTokens.length) {
+      ui.notifications.warn("Select a target to apply status");
+      return;
+    }
+
+    // Check if player owns all targets
+    const ownedTokens = targetTokens.filter(t => t.actor?.isOwner);
+    const unownedTokens = targetTokens.filter(t => !t.actor?.isOwner);
+
+    // If all tokens are owned, use original behavior
+    if (unownedTokens.length === 0) {
+      return originalApplyEffect.call(this, event, target);
+    }
+
+    // For unowned tokens, route through GM relay
+    if (!socket) {
+      ui.notifications.error("Socket not available");
+      return;
+    }
+
+    // Check for GM
+    const gmUser = game.users.find(u => u.isGM && u.active);
+    if (!gmUser) {
+      ui.notifications.warn("No GM available to apply status");
+      return;
+    }
+
+    // Apply to unowned tokens via GM relay
+    for (const tokenDoc of unownedTokens) {
+      const placedToken = canvas.tokens.get(tokenDoc.id);
+      if (!placedToken) continue;
+
+      const abilityData = await extractAbilityDataFromMessage(message);
+      
+      const result = await socket.executeAsGM("applyStatusToTarget", {
+        tokenId: placedToken.id,
+        statusName,
+        statusId,
+        statusUuid: effectUuid,
+        sourceActorId: abilityData?.sourceActorId || null,
+        sourceItemId: abilityData?.itemId || null,
+        sourceItemName: abilityData?.itemName || statusName,
+        sourcePlayerName: game.user.name,
+        ability: abilityData?.ability || null,
+        timestamp: Date.now(),
+        duration: abilityData?.duration || null
+      });
+
+      if (result?.success) {
+        ui.notifications.info(`Applied ${statusName} to ${placedToken.name}`);
+      } else {
+        ui.notifications.error(`Failed: ${result?.error || "Unknown error"}`);
+      }
+    }
+
+    // For owned tokens, use original handler
+    if (ownedTokens.length > 0) {
+      // Temporarily set controlled tokens to just the owned ones
+      const originalControlled = canvas.tokens.controlled;
+      canvas.tokens.controlled = ownedTokens;
+      
+      try {
+        await originalApplyEffect.call(this, event, target);
+      } finally {
+        canvas.tokens.controlled = originalControlled;
+      }
+    }
+  };
+}
 
 /**
  * Hook into ALL actor damage/healing to capture direct GM actions
@@ -1092,24 +1195,24 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
 });
 
 // =========================================================================
-// EVENT DELEGATION: Status Button Handler (PERMANENT DOCUMENT LISTENER)
+// STATUS BUTTON HANDLER (0.9.x FALLBACK)
+// For 0.10.0+, the ACTION override in installApplyEffectOverride() handles this
 // =========================================================================
 
 Hooks.once("ready", () => {
+  // Only install document-level handler if 0.10.0 ACTION override isn't available
+  const AbilityResultPart = globalThis.ds?.data?.pseudoDocuments?.messageParts?.AbilityResult;
+  if (AbilityResultPart?.ACTIONS?.applyEffect) {
+    return;
+  }
   
   document.addEventListener("click", async (event) => {
-    // 0.10.0: buttons use data-action="applyEffect"
-    // 0.9.x: buttons use data-type="status"
-    const statusBtn = event.target.closest('button[data-action="applyEffect"], button[data-type="status"]');
+    const statusBtn = event.target.closest('button[data-type="status"]');
     if (!statusBtn) return;
 
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-
-    // Disable the button immediately to prevent native handler
-    const originalAction = statusBtn.dataset.action;
-    delete statusBtn.dataset.action;
 
     try {
       const messageEl = statusBtn.closest("[data-message-id]");
@@ -1119,92 +1222,52 @@ Hooks.once("ready", () => {
       const message = game.messages.get(messageId);
       if (!message) throw new Error("Message not found: " + messageId);
 
-      const statusId = statusBtn.dataset.effectId || statusBtn.dataset.status;
+      const statusId = statusBtn.dataset.status;
       const statusName = statusBtn.textContent.trim();
       const effectUuid = statusBtn.dataset.uuid;
 
-      console.log(`${MODULE_ID}: Status button clicked - statusId="${statusId}", statusName="${statusName}"`);
-
-      // Get targets from message (0.10.0+) or fall back to user's current targets (0.9.x)
-      let targets = [];
-      
-      // 0.10.0: Use message's stored targets
-      if (message.system?.targets?.size > 0) {
-        console.log(`${MODULE_ID}: Using message.system.targets (0.10.0)`);
-        const tokenDocs = Array.from(message.system.targetTokens);
-        console.log(`${MODULE_ID}: Token docs:`, tokenDocs.map(t => t?.name));
-        targets = tokenDocs.map(tokenDoc => {
-          return canvas.tokens.get(tokenDoc.id);
-        }).filter(t => t);
-        console.log(`${MODULE_ID}: Resolved placed tokens:`, targets.map(t => t?.name));
-      }
-      
-      // Fallback to current user targets for 0.9.x
-      if (!targets.length) {
-        console.log(`${MODULE_ID}: Falling back to game.user.targets (0.9.x compat)`);
-        targets = Array.from(game.user.targets);
-      }
-      console.log(`${MODULE_ID}: Final targets:`, targets.map(t => t?.name));
+      const targets = Array.from(game.user.targets);
       if (!targets.length) {
         ui.notifications.warn("Select a target to apply status");
         return;
       }
 
       const abilityData = await extractAbilityDataFromMessage(message);
-      if (!abilityData) {
-        console.warn(`${MODULE_ID}: No ability data extracted`);
-        ui.notifications.warn("Could not extract ability");
-        return;
-      }
-
       if (!socket) {
-        console.error(`${MODULE_ID}: Socket not available`);
         ui.notifications.error("Socket not available");
         return;
       }
 
       for (const target of targets) {
-
-        
         const result = await socket.executeAsGM("applyStatusToTarget", {
           tokenId: target.id,
           statusName,
           statusId,
           statusUuid: effectUuid,
-          sourceActorId: abilityData.sourceActorId,
-          sourceItemId: abilityData.itemId,
-          sourceItemName: abilityData.itemName,
-          sourcePlayerName: abilityData.sourcePlayerName || game.user.name,
-          ability: abilityData.ability,
+          sourceActorId: abilityData?.sourceActorId,
+          sourceItemId: abilityData?.itemId,
+          sourceItemName: abilityData?.itemName,
+          sourcePlayerName: game.user.name,
+          ability: abilityData?.ability,
           timestamp: Date.now(),
-          duration: abilityData.duration
+          duration: abilityData?.duration
         });
 
-        if (!result) {
-          console.error(`${MODULE_ID}: Socket returned no result`);
-          ui.notifications.error("Socket error - no response");
-          continue;
-        }
-
-        if (result.success) {
+        if (result?.success) {
           ui.notifications.info(`Applied ${statusName} to ${target.name}`);
         } else {
-          console.error(`${MODULE_ID}: Failed to apply ${statusName}:`, result.error);
-          ui.notifications.error(`Failed: ${result.error}`);
+          ui.notifications.error(`Failed: ${result?.error || "Unknown error"}`);
         }
       }
 
     } catch (error) {
       console.error(`${MODULE_ID}: Status button handler error:`, error);
       ui.notifications.error(`Error: ${error.message}`);
-    } finally {
-      // Restore the action attribute
-      if (originalAction) statusBtn.dataset.action = originalAction;
     }
 
   }, { capture: true });
 
-  });
+});
 
 // Handle status undo button clicks in chat
 Hooks.on('renderChatMessageHTML', (message, html) => {
