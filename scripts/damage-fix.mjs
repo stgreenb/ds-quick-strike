@@ -1116,7 +1116,20 @@ Hooks.once("ready", () => {
       const statusName = statusBtn.textContent.trim();
       const effectUuid = statusBtn.dataset.uuid;
 
-      const targets = Array.from(game.user.targets);
+      // Get targets from message (0.10.0+) or fall back to user's current targets (0.9.x)
+      let targets = [];
+      if (message.system?.targetActors) {
+        // 0.10.0: Use targets stored in message when it was created
+        const actors = Array.from(message.system.targetActors);
+        targets = actors.map(actor => {
+          const token = canvas.tokens.placeables.find(t => t.actor?.id === actor.id);
+          return token;
+        }).filter(t => t);
+      }
+      // Fallback to current user targets for 0.9.x
+      if (!targets.length) {
+        targets = Array.from(game.user.targets);
+      }
       if (!targets.length) {
         ui.notifications.warn("Select a target to apply status");
         return;
