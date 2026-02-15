@@ -113,6 +113,10 @@ function installApplyEffectOverride() {
   }
 
   AbilityResultPart.ACTIONS.applyEffect = async function(event, target) {
+    // Prevent native handler from running
+    event.preventDefault();
+    event.stopPropagation();
+
     const statusId = target.dataset.effectId;
     const effectUuid = target.dataset.uuid;
     const statusName = target.textContent.trim();
@@ -1438,7 +1442,28 @@ async function handleGMApplyStatus({
       return { success: false, error: "Actor not found" };
     }
 
-    // Find in CONFIG
+    // If we have an effectUuid (PowerRollEffect UUID), use Draw Steel's native applyEffect method
+    if (statusUuid) {
+      try {
+        const effectDoc = await fromUuid(statusUuid);
+        if (effectDoc && typeof effectDoc.applyEffect === 'function') {
+          // Get the tier from the effect document
+          const tier = effectDoc.tier || effectDoc.parent?.tier || 3;
+          const tierKey = `tier${tier}`;
+          
+          console.log(`${MODULE_ID}: Using native applyEffect for ${statusName} via ${statusUuid}`);
+          
+          await effectDoc.applyEffect(tierKey, statusId, { targets: [actor] });
+          
+          // Success - skip our manual handling
+          return { success: true, statusName: statusName };
+        }
+      } catch (nativeError) {
+        console.warn(`${MODULE_ID}: Native applyEffect failed, falling back:`, nativeError.message);
+      }
+    }
+
+    // Fallback: Find in CONFIG.statusEffects
     const existingStatus = CONFIG.statusEffects.find(e => e.id === statusId);
 
     if (!existingStatus) {
@@ -1450,7 +1475,6 @@ async function handleGMApplyStatus({
     const hasStatus = actor.effects.some(e => e.getFlag('core', 'statusId') === statusId);
 
     if (!hasStatus) {
-      // Pass the effect end type if duration is available
       const effectEnd = duration?.end?.type || "";
       await actor.toggleStatusEffect(statusId, { active: true, overlay: false, effectEnd: effectEnd });
     }
