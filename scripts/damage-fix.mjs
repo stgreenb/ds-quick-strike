@@ -1107,6 +1107,10 @@ Hooks.once("ready", () => {
     event.stopPropagation();
     event.stopImmediatePropagation();
 
+    // Disable the button immediately to prevent native handler
+    const originalAction = statusBtn.dataset.action;
+    delete statusBtn.dataset.action;
+
     try {
       const messageEl = statusBtn.closest("[data-message-id]");
       if (!messageEl) throw new Error("No message element");
@@ -1120,28 +1124,21 @@ Hooks.once("ready", () => {
       const effectUuid = statusBtn.dataset.uuid;
 
       console.log(`${MODULE_ID}: Status button clicked - statusId="${statusId}", statusName="${statusName}"`);
-      console.log(`${MODULE_ID}: Button data attributes:`, { 
-        action: statusBtn.dataset.action,
-        effectId: statusBtn.dataset.effectId,
-        type: statusBtn.dataset.type,
-        uuid: statusBtn.dataset.uuid 
-      });
 
       // Get targets from message (0.10.0+) or fall back to user's current targets (0.9.x)
       let targets = [];
-      console.log(`${MODULE_ID}: message.system:`, message.system);
-      console.log(`${MODULE_ID}: message.system?.targetActors:`, message.system?.targetActors);
-      console.log(`${MODULE_ID}: message.system?.targets:`, message.system?.targets);
-      if (message.system?.targetActors) {
-        console.log(`${MODULE_ID}: Using message.system.targetActors (0.10.0)`);
-        const actors = Array.from(message.system.targetActors);
-        console.log(`${MODULE_ID}: Target actors from message:`, actors.map(a => a?.name));
-        targets = actors.map(actor => {
-          const token = canvas.tokens.placeables.find(t => t.actor?.id === actor.id);
-          return token;
+      
+      // 0.10.0: Use message's stored targets
+      if (message.system?.targets?.size > 0) {
+        console.log(`${MODULE_ID}: Using message.system.targets (0.10.0)`);
+        const tokenDocs = Array.from(message.system.targetTokens);
+        console.log(`${MODULE_ID}: Token docs:`, tokenDocs.map(t => t?.name));
+        targets = tokenDocs.map(tokenDoc => {
+          return canvas.tokens.get(tokenDoc.id);
         }).filter(t => t);
-        console.log(`${MODULE_ID}: Resolved tokens:`, targets.map(t => t?.name));
+        console.log(`${MODULE_ID}: Resolved placed tokens:`, targets.map(t => t?.name));
       }
+      
       // Fallback to current user targets for 0.9.x
       if (!targets.length) {
         console.log(`${MODULE_ID}: Falling back to game.user.targets (0.9.x compat)`);
@@ -1200,6 +1197,9 @@ Hooks.once("ready", () => {
     } catch (error) {
       console.error(`${MODULE_ID}: Status button handler error:`, error);
       ui.notifications.error(`Error: ${error.message}`);
+    } finally {
+      // Restore the action attribute
+      if (originalAction) statusBtn.dataset.action = originalAction;
     }
 
   }, { capture: true });
