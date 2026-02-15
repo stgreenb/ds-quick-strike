@@ -51,6 +51,7 @@ Hooks.once('socketlib.ready', () => {
     socket.register('applyStatusToTarget', handleGMApplyStatus);
     socket.register('undoStatusApplication', handleGMUndoStatus);
     console.log(`${MODULE_ID}: SocketLib registered successfully`);
+    console.log(`${MODULE_ID}: Version 2026-02-15-b - Draw Steel ${game.system?.version} detected`);
   } catch (error) {
     console.error(`${MODULE_ID}: Failed to register socketlib:`, error);
   }
@@ -1116,20 +1117,26 @@ Hooks.once("ready", () => {
       const statusName = statusBtn.textContent.trim();
       const effectUuid = statusBtn.dataset.uuid;
 
+      console.log(`${MODULE_ID}: Status button clicked - statusId="${statusId}", statusName="${statusName}"`);
+
       // Get targets from message (0.10.0+) or fall back to user's current targets (0.9.x)
       let targets = [];
       if (message.system?.targetActors) {
-        // 0.10.0: Use targets stored in message when it was created
+        console.log(`${MODULE_ID}: Using message.system.targetActors (0.10.0)`);
         const actors = Array.from(message.system.targetActors);
+        console.log(`${MODULE_ID}: Target actors from message:`, actors.map(a => a?.name));
         targets = actors.map(actor => {
           const token = canvas.tokens.placeables.find(t => t.actor?.id === actor.id);
           return token;
         }).filter(t => t);
+        console.log(`${MODULE_ID}: Resolved tokens:`, targets.map(t => t?.name));
       }
       // Fallback to current user targets for 0.9.x
       if (!targets.length) {
+        console.log(`${MODULE_ID}: Falling back to game.user.targets (0.9.x compat)`);
         targets = Array.from(game.user.targets);
       }
+      console.log(`${MODULE_ID}: Final targets:`, targets.map(t => t?.name));
       if (!targets.length) {
         ui.notifications.warn("Select a target to apply status");
         return;
