@@ -121,12 +121,13 @@ function installApplyEffectOverride() {
     
     // Try to get targets from message storage (0.10.0)
     if (message.system?.targetTokens?.size > 0) {
-      targetTokens = Array.from(message.system.targetTokens);
+      const tokenDocs = Array.from(message.system.targetTokens);
+      targetTokens = tokenDocs.map(doc => canvas.tokens.get(doc.id)).filter(t => t);
     }
     
-    // Fallback to current selection
+    // Fallback to user's targeted tokens (not controlled)
     if (!targetTokens.length) {
-      targetTokens = Array.from(canvas.tokens.controlled);
+      targetTokens = Array.from(game.user.targets);
     }
 
     if (!targetTokens.length) {
@@ -157,14 +158,11 @@ function installApplyEffectOverride() {
     }
 
     // Apply to unowned tokens via GM relay
-    for (const tokenDoc of unownedTokens) {
-      const placedToken = canvas.tokens.get(tokenDoc.id);
-      if (!placedToken) continue;
-
+    for (const token of unownedTokens) {
       const abilityData = await extractAbilityDataFromMessage(message);
       
       const result = await socket.executeAsGM("applyStatusToTarget", {
-        tokenId: placedToken.id,
+        tokenId: token.id,
         statusName,
         statusId,
         statusUuid: effectUuid,
@@ -178,7 +176,7 @@ function installApplyEffectOverride() {
       });
 
       if (result?.success) {
-        ui.notifications.info(`Applied ${statusName} to ${placedToken.name}`);
+        ui.notifications.info(`Applied ${statusName} to ${token.name}`);
       } else {
         ui.notifications.error(`Failed: ${result?.error || "Unknown error"}`);
       }
