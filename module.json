@@ -14,7 +14,7 @@
     "verified": "13"
   },
   "url": "https://github.com/stgreenb/ds-quick-strike",
-  "manifest": "https://raw.githubusercontent.com/stgreenb/ds-quick-strike/compat/draw-steel-0.10/module.json",
+  "manifest": "https://raw.githubusercontent.com/stgreenb/ds-quick-strike/master/module.json",
   "download": "https://github.com/stgreenb/ds-quick-strike/releases/download/v2.0.0/ds-quick-strike-v2.0.0.zip",
   "socket": true,
   "relationships": {
