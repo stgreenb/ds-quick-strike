@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0-pre-ds0.10] - 2025-02-15
+## [2.0.0] - 2025-02-18
 
 ### Added
 - **Draw Steel 0.10.0 Compatibility**: Full support for Draw Steel 0.10.0's new chat parts system
@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Damage Callback**: Updated to handle 0.10.0's `data-message-part` attribute for roll retrieval
 
 ### Known Issues
-- Cosmetic permission errors on non-GM clients when status effects applied (Draw Steel bug: [#1640](https://github.com/MetaMorphic-Digital/draw-steel/issues/1640))
-- `[[/surge]]` and `[[/gain]]` enrichers apply to source actor, not target
+- Cosmetic permission errors on non-GM clients when status effects applied (Draw Steel bug, not module issue)
+- `[[/surge]]` and `[[/gain]]` enrichers apply to source actor, not target (Draw Steel behavior)
 
 ### Breaking Changes
 - **Requires Draw Steel 0.10.0+** - Not compatible with 0.9.x
