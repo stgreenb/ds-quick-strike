@@ -50,8 +50,8 @@ jobs:
           sed -i 's/"version": "[^"]*"/"version": "${{ env.VERSION }}"/' ds-quick-strike/module.json
           # Update manifest URL to use latest for automatic updates
           sed -i 's|"manifest": ".*"|"manifest": "https://github.com/stgreenb/ds-quick-strike/releases/latest/download/module.json"|' ds-quick-strike/module.json
-          # Update download URL
-          sed -i 's|"download": ".*"|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/ds-quick-strike-${{ env.VERSION }}.zip"|' ds-quick-strike/module.json
+          # Update download URL (use original tag name with 'v' prefix)
+          sed -i 's|"download": ".*"|"download": "https://github.com/stgreenb/ds-quick-strike/releases/download/${{ github.ref_name }}/ds-quick-strike-${{ env.VERSION }}.zip"|' ds-quick-strike/module.json
           # Show the result
           cat ds-quick-strike/module.json
 
@@ -73,7 +73,7 @@ jobs:
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.VERSION }}
+          tag_name: ${{ github.ref_name }}
           name: Draw Steel Quick Strike v${{ env.VERSION }}
           body: |
             ## Draw Steel Quick Strike v${{ env.VERSION }}
@@ -94,7 +94,7 @@ jobs:
 
             ### Installation
             1. In Foundry, go to **Add-on Modules** → **Install Module**
-            2. Enter this URL: `https://github.com/stgreenb/ds-quick-strike/releases/download/${{ env.VERSION }}/module.json`
+            2. Enter this URL: `https://github.com/stgreenb/ds-quick-strike/releases/download/${{ github.ref_name }}/module.json`
             3. Click **Install**
 
           draft: false
