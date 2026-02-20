@@ -1166,20 +1166,145 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
   });
 });
 
-// =========================================================================
-// STATUS BUTTON HANDLER (0.9.x FALLBACK)
-// For 0.10.0+, the ACTION override in installApplyEffectOverride() handles this
-// =========================================================================
-
-Hooks.once("ready", () => {
-  // Only install document-level handler if 0.10.0 ACTION override isn't available
-  const AbilityResultPart = globalThis.ds?.data?.pseudoDocuments?.messageParts?.AbilityResult;
-  if (AbilityResultPart?.ACTIONS?.applyEffect) {
+/**
+ * Handle enricher apply-effect link clicks (e.g., [[/apply frightened]])
+ * Routes through GM relay for unowned tokens
+ */
+async function handleEnricherApplyClick(link, tokens) {
+  const type = link.dataset.type;
+  const statusId = link.dataset.status;
+  const effectUuid = link.dataset.uuid;
+  const end = link.dataset.end;
+  const statusName = link.textContent.trim();
+  
+  if (!socket) {
+    ui.notifications.error("Socket not available");
     return;
   }
   
+  const gmUser = game.users.find(u => u.isGM && u.active);
+  if (!gmUser) {
+    ui.notifications.warn("No GM available to apply status");
+    return;
+  }
+  
+  for (const token of tokens) {
+    const result = await socket.executeAsGM("applyStatusToTarget", {
+      tokenId: token.id,
+      statusName,
+      statusId,
+      statusUuid: effectUuid,
+      sourceActorId: null,
+      sourceItemId: null,
+      sourceItemName: statusName,
+      sourcePlayerName: game.user.name,
+      ability: null,
+      timestamp: Date.now(),
+      duration: end ? { type: 'draw-steel', label: end, end: { type: end } } : null
+    });
+    
+    if (result?.success) {
+      ui.notifications.info(`Applied ${statusName} to ${token.name}`);
+    } else {
+      ui.notifications.error(`Failed: ${result?.error || "Unknown error"}`);
+    }
+  }
+}
+
+/**
+ * Handle enricher apply-effect link clicks for owned tokens (direct application)
+ */
+async function handleEnricherApplyClickDirect(link, tokens) {
+  const type = link.dataset.type;
+  const statusId = link.dataset.status;
+  const effectUuid = link.dataset.uuid;
+  const end = link.dataset.end;
+  const statusName = link.textContent.trim();
+  
+  for (const token of tokens) {
+    const actor = token.actor;
+    if (!actor) continue;
+    
+    try {
+      // Create the effect
+      const DrawSteelActiveEffect = CONFIG.ActiveEffect.documentClass;
+      const tempEffect = type === "custom" 
+        ? (await fromUuid(effectUuid))?.clone({}, { keepId: true, addSource: true })
+        : await DrawSteelActiveEffect.fromStatusEffect(statusId);
+      
+      if (!tempEffect) {
+        ui.notifications.error(`Could not create effect: ${statusName}`);
+        continue;
+      }
+      
+      const updates = {
+        transfer: true,
+        system: {}
+      };
+      if (end) updates.system.end = { type: end };
+      tempEffect.updateSource(updates);
+      
+      await actor.createEmbeddedDocuments("ActiveEffect", [tempEffect.toObject()], { keepId: true });
+      ui.notifications.info(`Applied ${statusName} to ${token.name}`);
+    } catch (error) {
+      console.error(`${MODULE_ID}: Error applying effect:`, error);
+      ui.notifications.error(`Failed to apply ${statusName}: ${error.message}`);
+    }
+  }
+}
+
+// =========================================================================
+// STATUS BUTTON HANDLER (0.9.x FALLBACK + 0.10.0 ENRICHER)
+// For 0.10.0+ chat buttons, the ACTION override in installApplyEffectOverride() handles this
+// For 0.10.0+ enricher links ([[/apply]]), we need to intercept the anchor clicks
+// =========================================================================
+
+Hooks.once("ready", () => {
+  const AbilityResultPart = globalThis.ds?.data?.pseudoDocuments?.messageParts?.AbilityResult;
+  
   document.addEventListener("click", async (event) => {
     const statusBtn = event.target.closest('button[data-type="status"]');
+    const statusLink = event.target.closest('a[data-type="status"], a[data-type="custom"]');
+    
+    if (!statusBtn && !statusLink) return;
+    
+    if (statusLink) {
+      const targets = Array.from(game.user.targets);
+      const controlledTokens = canvas?.tokens?.controlled ?? [];
+      
+      // Draw Steel's native enricher handler uses CONTROLLED tokens, not TARGETS
+      // If user has targets, we must intercept because native handler ignores them
+      
+      if (targets.length > 0) {
+        const unownedTargets = targets.filter(t => !t.actor?.isOwner);
+        
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        
+        if (game.user.isGM || unownedTargets.length === 0) {
+          await handleEnricherApplyClickDirect(statusLink, targets);
+        } else {
+          await handleEnricherApplyClick(statusLink, unownedTargets);
+        }
+        return;
+      }
+      
+      if (controlledTokens.length === 0) return;
+      
+      const unownedTokens = controlledTokens.filter(t => !t.actor?.isOwner);
+      
+      if (game.user.isGM || unownedTokens.length === 0) return;
+      
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      
+      await handleEnricherApplyClick(statusLink, unownedTokens);
+      return;
+    }
+    
+    // Original 0.9.x button handling continues...
     if (!statusBtn) return;
 
     event.preventDefault();

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2025-02-20
+
+### Fixed
+- **Enricher Link Target Support**: `[[/apply]]` enricher links now correctly apply to **targeted** tokens instead of only controlled tokens, matching the behavior of chat message buttons
+- **Duration Support**: Enricher links with duration parameters (e.g., `[[/apply slowed save]]`) now properly pass the duration through to the applied effect
+
+### Changed
+- Removed verbose debug logging for cleaner console output
+
 ## [2.0.0] - 2025-02-18
 
 ### Added
