@@ -127,8 +127,30 @@ function installApplyEffectOverride() {
     const ownedTokens = targetTokens.filter(t => t.actor?.isOwner);
     const unownedTokens = targetTokens.filter(t => !t.actor?.isOwner);
 
-    if (unownedTokens.length === 0) {
+    if (unownedTokens.length === 0 && !game.user.isGM) {
       return originalApplyEffect.call(this, event, target);
+    }
+
+    if (unownedTokens.length === 0 && game.user.isGM) {
+      const abilityData = await extractAbilityDataFromMessage(message);
+      const eventId = `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      for (const token of targetTokens) {
+        await applyStatusWithLogging({
+          token,
+          statusId,
+          statusName,
+          effectUuid,
+          sourceActorId: abilityData?.sourceActorId || null,
+          sourceItemId: abilityData?.itemId || null,
+          sourceItemName: abilityData?.itemName || statusName,
+          sourcePlayerName: game.user.name,
+          ability: abilityData?.ability || null,
+          duration: abilityData?.duration || null,
+          eventId
+        });
+      }
+      return;
     }
 
     if (!socket) {
@@ -991,7 +1013,7 @@ async function extractAbilityDataFromMessage(message) {
       duration: durationInfo
     };
 
-        return abilityData;
+    return abilityData;
   } catch (error) {
     console.error(`${MODULE_ID}: Error extracting ability data from message:`, error);
     return null;
@@ -1171,7 +1193,6 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
  * Routes through GM relay for unowned tokens
  */
 async function handleEnricherApplyClick(link, tokens) {
-  const type = link.dataset.type;
   const statusId = link.dataset.status;
   const effectUuid = link.dataset.uuid;
   const end = link.dataset.end;
@@ -1215,40 +1236,32 @@ async function handleEnricherApplyClick(link, tokens) {
  * Handle enricher apply-effect link clicks for owned tokens (direct application)
  */
 async function handleEnricherApplyClickDirect(link, tokens) {
-  const type = link.dataset.type;
   const statusId = link.dataset.status;
   const effectUuid = link.dataset.uuid;
   const end = link.dataset.end;
   const statusName = link.textContent.trim();
+  const eventId = `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const duration = end ? { type: 'draw-steel', label: end, end: { type: end } } : null;
   
   for (const token of tokens) {
-    const actor = token.actor;
-    if (!actor) continue;
+    const result = await applyStatusWithLogging({
+      token,
+      statusId,
+      statusName,
+      effectUuid,
+      sourceActorId: null,
+      sourceItemId: null,
+      sourceItemName: statusName,
+      sourcePlayerName: game.user.name,
+      ability: null,
+      duration,
+      eventId
+    });
     
-    try {
-      // Create the effect
-      const DrawSteelActiveEffect = CONFIG.ActiveEffect.documentClass;
-      const tempEffect = type === "custom" 
-        ? (await fromUuid(effectUuid))?.clone({}, { keepId: true, addSource: true })
-        : await DrawSteelActiveEffect.fromStatusEffect(statusId);
-      
-      if (!tempEffect) {
-        ui.notifications.error(`Could not create effect: ${statusName}`);
-        continue;
-      }
-      
-      const updates = {
-        transfer: true,
-        system: {}
-      };
-      if (end) updates.system.end = { type: end };
-      tempEffect.updateSource(updates);
-      
-      await actor.createEmbeddedDocuments("ActiveEffect", [tempEffect.toObject()], { keepId: true });
+    if (result?.success) {
       ui.notifications.info(`Applied ${statusName} to ${token.name}`);
-    } catch (error) {
-      console.error(`${MODULE_ID}: Error applying effect:`, error);
-      ui.notifications.error(`Failed to apply ${statusName}: ${error.message}`);
+    } else {
+      ui.notifications.error(`Failed to apply ${statusName}: ${result?.error || 'Unknown error'}`);
     }
   }
 }
@@ -1385,7 +1398,6 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
     const statusId = statusUndoBtn.dataset.statusId;
     const eventId = statusUndoBtn.dataset.eventId ?? null;
 
-    
     if (!game.user.isGM) {
       ui.notifications.error('Only GM can undo status');
       return;
@@ -1420,7 +1432,6 @@ async function handleGMUndoDamage({ targetTokenId, originalPerm, originalTemp, t
       return { success: false, error: "Actor not found" };
     }
 
-    
     const currentStamina = getStaminaSnapshot(actor);
 
     const boundedStamina = applyStaminaBounds(actor, { permanent: originalPerm, temporary: originalTemp });
@@ -1509,121 +1520,175 @@ async function handleGMApplyStatus({
       return { success: false, error: "Token not found" };
     }
 
-    const actor = token.actor;
-    if (!actor) {
-      return { success: false, error: "Actor not found" };
-    }
-
-    // If we have an effectUuid (PowerRollEffect UUID), use Draw Steel's native applyEffect method
-    if (statusUuid) {
-      try {
-        const effectDoc = await fromUuid(statusUuid);
-        if (effectDoc && typeof effectDoc.applyEffect === 'function') {
-          const tier = effectDoc.tier || effectDoc.parent?.tier || 3;
-          const tierKey = `tier${tier}`;
-          
-          await effectDoc.applyEffect(tierKey, statusId, { targets: [actor] });
-          
-          return { success: true, statusName: statusName };
-        }
-      } catch (nativeError) {
-        console.warn(`${MODULE_ID}: Native applyEffect failed, falling back:`, nativeError.message);
-      }
-    }
-
-    // Fallback: Find in CONFIG.statusEffects
-    const existingStatus = CONFIG.statusEffects.find(e => e.id === statusId);
-
-    if (!existingStatus) {
-      console.error(`${MODULE_ID}: Status "${statusId}" not found in CONFIG.statusEffects`);
-      return { success: false, error: `Status ${statusId} not found` };
-    }
-
-    // Check if the status is already active
-    const hasStatus = actor.effects.some(e => e.getFlag('core', 'statusId') === statusId);
-
-    if (!hasStatus) {
-      const effectEnd = duration?.end?.type || "";
-      await actor.toggleStatusEffect(statusId, { active: true, overlay: false, effectEnd: effectEnd });
-    }
-
-    // Find the created effect for tracking
-    let appliedEffect = actor.effects.find(e => e && e.getFlag && e.getFlag('core', 'statusId') === statusId);
-
-    // Fallback: find by name if flag lookup fails
-    if (!appliedEffect) {
-      appliedEffect = actor.effects.find(e => e && e.name === statusName);
-    }
-
-    // Second fallback: find by ID pattern
-    if (!appliedEffect && statusId === 'slowed') {
-      appliedEffect = actor.effects.find(e => e && e.id && e.id.includes('slowed'));
-    }
-
-    const effectId = appliedEffect?.id;
-
-    // Set the source information on the created effect if it exists
-    if (appliedEffect && sourceActorId) {
-      await appliedEffect.update({
-        'system.source': {
-          actorId: sourceActorId,
-          actorName: sourcePlayerName ?? "Unknown",
-          itemId: sourceItemId,
-          itemName: sourceItemName
-        }
-      });
-    }
-
-    const generatedEventId = eventId || `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    await logStatusToChat({
-      type: "apply",
-      statusName: statusName,
-      statusId: statusId,
-      statusUuid: statusUuid,
-      targetName: actor.name,
-      targetTokenId: token.id,
-      targetActorId: actor.id,
-      sourceActorId: sourceActorId,
-      sourceActorName: sourcePlayerName ?? "Unknown", // Use the player name as source
-      sourceItemId: sourceItemId,
-      sourceItemName: sourceItemName,
-      sourcePlayerName: sourcePlayerName,
-      source: "socket",
-      effectId: effectId,
-      eventId: generatedEventId,
-      timestamp: timestamp,
-      duration: duration
+    return await applyStatusWithLogging({
+      token,
+      statusId,
+      statusName,
+      effectUuid: statusUuid,
+      sourceActorId,
+      sourceItemId,
+      sourceItemName,
+      sourcePlayerName,
+      ability,
+      duration,
+      eventId,
+      timestamp
     });
-
-    const hookPayload = {
-      actorId: actor.id,
-      tokenId: token.id,
-      statusName: statusName,
-      statusId: statusId,
-      statusUuid: statusUuid,
-      effectId: null,
-      sourceActorId: sourceActorId,
-      sourceItemId: sourceItemId,
-      sourceItemName: sourceItemName,
-      sourcePlayerName: sourcePlayerName,
-      ability: ability,
-      eventId: generatedEventId,
-      timestamp: timestamp
-    };
-
-    try {
-      Hooks.callAll("ds-quick-strikeStatusApplied", hookPayload);
-    } catch (hookError) {
-      console.error(`${MODULE_ID}: Error firing ds-quick-strikeStatusApplied hook`, hookError);
-    }
-
-    return { success: true, statusName: statusName };
-
   } catch (error) {
     console.error(`${MODULE_ID}: GM apply status error`, error);
     return { success: false, error: error.message };
   }
+}
+
+async function applyStatusWithLogging({
+  token,
+  statusId,
+  statusName,
+  effectUuid,
+  sourceActorId,
+  sourceItemId,
+  sourceItemName,
+  sourcePlayerName,
+  ability = null,
+  duration = null,
+  eventId = null,
+  timestamp = null
+}) {
+  const actor = token.actor;
+  if (!actor) {
+    return { success: false, error: "Actor not found" };
+  }
+
+  if (effectUuid) {
+    try {
+      const effectDoc = await fromUuid(effectUuid);
+      if (effectDoc && typeof effectDoc.applyEffect === 'function') {
+        const tier = effectDoc.tier || effectDoc.parent?.tier || 3;
+        const tierKey = `tier${tier}`;
+        
+        await effectDoc.applyEffect(tierKey, statusId, { targets: [actor] });
+        
+        const generatedEventId = eventId || `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        await logStatusToChat({
+          type: "apply",
+          statusName: statusName,
+          statusId: statusId,
+          statusUuid: effectUuid,
+          targetName: actor.name,
+          targetTokenId: token.id,
+          targetActorId: actor.id,
+          sourceActorId: sourceActorId,
+          sourceActorName: sourcePlayerName ?? "Unknown",
+          sourceItemId: sourceItemId,
+          sourceItemName: sourceItemName,
+          sourcePlayerName: sourcePlayerName,
+          source: game.user.isGM ? "direct" : "socket",
+          effectId: null,
+          eventId: generatedEventId,
+          timestamp: timestamp || Date.now(),
+          duration: duration
+        });
+        
+        Hooks.callAll("ds-quick-strikeStatusApplied", {
+          actorId: actor.id,
+          tokenId: token.id,
+          statusName: statusName,
+          statusId: statusId,
+          statusUuid: effectUuid,
+          effectId: null,
+          sourceActorId: sourceActorId,
+          sourceItemId: sourceItemId,
+          sourceItemName: sourceItemName,
+          sourcePlayerName: sourcePlayerName,
+          ability: ability,
+          eventId: generatedEventId,
+          timestamp: timestamp || Date.now()
+        });
+        
+        return { success: true, statusName: statusName };
+      }
+    } catch (nativeError) {
+      console.warn(`${MODULE_ID}: Native applyEffect failed, falling back:`, nativeError.message);
+    }
+  }
+
+  const existingStatus = CONFIG.statusEffects.find(e => e.id === statusId);
+
+  if (!existingStatus) {
+    console.error(`${MODULE_ID}: Status "${statusId}" not found in CONFIG.statusEffects`);
+    return { success: false, error: `Status ${statusId} not found` };
+  }
+
+  const hasStatus = actor.effects.some(e => e.statuses?.has(statusId));
+
+  if (!hasStatus) {
+    const effectEnd = duration?.end?.type || "";
+    await actor.toggleStatusEffect(statusId, { active: true, overlay: false, effectEnd: effectEnd });
+  }
+
+  let appliedEffect = actor.effects.find(e => e.statuses?.has(statusId));
+
+  if (!appliedEffect) {
+    appliedEffect = actor.effects.find(e => e && e.name === statusName);
+  }
+
+  if (!appliedEffect && statusId === 'slowed') {
+    appliedEffect = actor.effects.find(e => e && e.id && e.id.includes('slowed'));
+  }
+
+  const resolvedEffectId = appliedEffect?.id;
+
+  if (appliedEffect && sourceActorId) {
+    await appliedEffect.update({
+      'system.source': {
+        actorId: sourceActorId,
+        actorName: sourcePlayerName ?? "Unknown",
+        itemId: sourceItemId,
+        itemName: sourceItemName
+      }
+    });
+  }
+
+  const generatedEventId = eventId || `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  await logStatusToChat({
+    type: "apply",
+    statusName: statusName,
+    statusId: statusId,
+    statusUuid: effectUuid,
+    targetName: actor.name,
+    targetTokenId: token.id,
+    targetActorId: actor.id,
+    sourceActorId: sourceActorId,
+    sourceActorName: sourcePlayerName ?? "Unknown",
+    sourceItemId: sourceItemId,
+    sourceItemName: sourceItemName,
+    sourcePlayerName: sourcePlayerName,
+    source: game.user.isGM ? "direct" : "socket",
+    effectId: resolvedEffectId,
+    eventId: generatedEventId,
+    timestamp: timestamp || Date.now(),
+    duration: duration
+  });
+
+  Hooks.callAll("ds-quick-strikeStatusApplied", {
+    actorId: actor.id,
+    tokenId: token.id,
+    statusName: statusName,
+    statusId: statusId,
+    statusUuid: effectUuid,
+    effectId: null,
+    sourceActorId: sourceActorId,
+    sourceItemId: sourceItemId,
+    sourceItemName: sourceItemName,
+    sourcePlayerName: sourcePlayerName,
+    ability: ability,
+    eventId: generatedEventId,
+    timestamp: timestamp || Date.now()
+  });
+
+  return { success: true, statusName: statusName };
 }
 
 /**

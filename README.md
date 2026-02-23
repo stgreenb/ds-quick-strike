@@ -4,11 +4,12 @@ A Foundry VTT module that enables collaborative damage application in the Draw S
 
 ## Overview
 
-Foundry, by default, prevents players from applying damage tokens they don't own. This module solves that limitation by:
+Foundry, by default, prevents players from applying damage to tokens they don't own. This module solves that limitation by:
 
 - Providing a socket-based communication channel for damage requests to tokens they've "targeted"
-- Notifcations (via PM) to GM/Director with undo capibilites for damage
-- Quick reminders to players if they accidently target themselves for damage. 
+- Notifications (via PM) to GM/Director with undo capabilities for damage
+- Quick reminders to players if they accidentally target themselves for damage
+- **Full GM/Director support**: Chat logging, undo buttons, and animation hooks work for both player-relayed and direct GM actions
 
 <img title="" src="images/ds-quick-strike-demo.png" alt="Draw Steel Quick Strike in action" width="176" height="185" data-align="center">
 

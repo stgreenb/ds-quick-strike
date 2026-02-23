@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-02-23
+
+### Added
+- **GM/Director Full Feature Support**: GMs and Directors now get complete functionality when applying damage or conditions directly:
+  - Chat logging with stamina changes (previously missing for direct GM actions)
+  - Undo buttons for both damage/healing and status effects
+  - Proper target application (vs selection)
+  - Animation hooks (`ds-quick-strike:damageApplied`, `ds-quick-strikeStatusApplied`)
+
+### Fixed
+- **v13 API Compatibility**: Updated status effect detection to use `effect.statuses.has(statusId)` instead of deprecated `getFlag('core', 'statusId')`
+- **Code Cleanup**: Removed unused variables and extra blank lines
+
+### Changed
+- **Unified Status Application**: New `applyStatusWithLogging()` helper function ensures consistent behavior for both GM direct actions and socket-relayed actions
+
 ## [2.0.1] - 2025-02-20
 
 ### Fixed
