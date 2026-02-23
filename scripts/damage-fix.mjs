@@ -119,6 +119,10 @@ function installApplyEffectOverride() {
       targetTokens = Array.from(game.user.targets);
     }
 
+    if (!targetTokens.length && game.user.isGM) {
+      targetTokens = canvas.tokens.controlled;
+    }
+
     if (!targetTokens.length) {
       ui.notifications.warn("Select a target to apply status");
       return;
