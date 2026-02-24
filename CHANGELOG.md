@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2025-02-24
+
+### Fixed
+- **Damage Chat Log Accuracy**: Chat messages now show the actual damage taken after immunities/weaknesses are applied, not the raw damage amount
+- **Immunity/Weakness Display**: Chat messages now indicate when damage was reduced by immunity or increased by weakness (e.g., "1 corruption (was 5, reduced by 4 immunity)")
+
+### Changed
+- `handleGMDamageApplication` now calculates and reports `actualDamage` based on stamina change rather than reporting the pre-immunity amount
+
 ## [2.1.1] - 2025-02-23
 
 ### Fixed

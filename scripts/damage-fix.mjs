@@ -546,9 +546,13 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
       await actor.update({'system.stamina.value': newStamina.permanent});
     }
 
+    // Calculate actual damage taken (after immunities/weaknesses)
+    const actualDamage = originalStamina.permanent - newStamina.permanent;
+
     await logDamageToChat({
       type: 'damage',
-      amount: amount,
+      amount: actualDamage,
+      originalAmount: amount,
       damageType: type,
       targetName: actor.name,
       targetTokenId: token.id,
@@ -568,7 +572,7 @@ async function handleGMDamageApplication({ tokenId, amount, type, ignoredImmunit
     return {
       success: true,
       tokenName: token.name,
-      damageApplied: amount
+      damageApplied: actualDamage
     };
   } catch (error) {
     console.error(`${MODULE_ID}: GM damage error:`, error);
@@ -671,6 +675,17 @@ async function logDamageToChat(entry) {
 
     const hookPayload = await prepareHookPayload(entry);
 
+    // Build damage display showing immunity/weakness reduction
+    let damageDisplay = `${entry.amount} ${entry.damageType}`;
+    if (entry.originalAmount && entry.originalAmount !== entry.amount) {
+      const reduction = entry.originalAmount - entry.amount;
+      if (reduction > 0) {
+        damageDisplay = `${entry.amount} ${entry.damageType} <span style="color: #2a9d8f; font-size: 0.9em;">(was ${entry.originalAmount}, reduced by ${reduction} immunity)</span>`;
+      } else if (reduction < 0) {
+        damageDisplay = `${entry.amount} ${entry.damageType} <span style="color: #e76f51; font-size: 0.9em;">(was ${entry.originalAmount}, increased by ${Math.abs(reduction)} weakness)</span>`;
+      }
+    }
+
     const publicContent = `
       <div style="font-family: monospace; padding: 8px; border-left: 3px solid ${entry.type === 'damage' ? '#e76f51' : '#2a9d8f'};">
         <div style="margin-bottom: 8px;">
@@ -680,7 +695,7 @@ async function logDamageToChat(entry) {
           <strong>${entry.targetName}</strong> hit by <strong>${entry.sourceActorName}</strong>
         </div>
         <div style="margin-bottom: 4px;">
-          ${entry.amount} ${entry.damageType}
+          ${damageDisplay}
         </div>
       </div>
     `;
@@ -695,7 +710,7 @@ async function logDamageToChat(entry) {
           <strong>${entry.targetName}</strong> hit by <strong>${entry.sourceActorName}</strong>
         </div>
         <div style="margin-bottom: 4px;">
-          ${entry.amount} ${entry.damageType}
+          ${damageDisplay}
           (Stamina: ${staminaDisplay})
         </div>
         <div style="margin-top: 8px;">
