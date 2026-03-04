@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] - 2026-03-04
+
+### Fixed
+- **Custom Status Effects**: Resolved "Status undefined not found" error for Draw Steel 0.10.x custom effects like "Marked" and "Judged"
+- **UUID-based Effect Handling**: Implemented proper handling of Draw Steel 0.10.x UUID-based custom Active Effects using Foundry's standard `actor.createEmbeddedDocuments("ActiveEffect", [...])` approach
+- **Socket Parameter Naming**: Fixed parameter name mismatch between client (`statusUuid`) and server (`effectUuid`) that prevented proper UUID transmission
+
+### Added
+- **Robust Null Checking**: Added comprehensive null checking for token and actor properties to prevent runtime errors
+- **Fallback Effect Resolution**: Added fallback logic to resolve effects by ID when UUID resolution fails
+
+### Changed
+- **Effect Application Logic**: Updated status application to clone effect documents before applying, matching Draw Steel's native behavior
+- **Backward Compatibility**: Maintained full compatibility with standard status effects while adding support for custom effects
+- **Animation Hook Support**: Preserved ds-aa-bridge animation hook compatibility with the updated implementation
+
 ## [2.1.2] - 2025-02-24
 
 ### Fixed
