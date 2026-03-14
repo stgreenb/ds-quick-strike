@@ -176,7 +176,8 @@ function installApplyEffectOverride() {
     for (const token of unownedTokens) {
       const abilityData = await extractAbilityDataFromMessage(message);
       
-      console.log(`[ds-quick-strike] Player-side: About to call socket for token=${token.id}, statusId=${statusId}, effectUuid=${effectUuid}`);
+      console.log(`[ds-quick-strike] Player-side: About to call socket for token=${token.id}, statusId=${statusId}, statusName=${statusName}, effectUuid=${effectUuid}`);
+      console.log(`[ds-quick-strike] Player-side: target.dataset =`, target.dataset);
       
       const result = await socket.executeAsGM("applyStatusToTarget", {
         tokenId: token.id,
