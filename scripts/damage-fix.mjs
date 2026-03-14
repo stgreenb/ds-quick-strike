@@ -108,7 +108,7 @@ function installApplyEffectOverride() {
     event.preventDefault();
     event.stopPropagation();
 
-    const statusId = target.dataset.effectId;
+    const statusId = target.dataset.status || target.dataset.effectId;
     const effectUuid = target.dataset.uuid;
     const statusName = target.textContent.trim();
 
