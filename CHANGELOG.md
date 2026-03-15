@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.9] - 2026-03-15
+
+### Fixed
+- **Status Effect Duration**: Fixed status effect duration (Save Ends, EoT, Encounter) being lost when applying conditions via Quick Strike
+- **PowerRollEffect Duration**: Added extraction of duration from PowerRollEffect documents when applying status effects from power roll results
+- **Display String Parsing**: Added fallback to parse duration from display string (e.g., "taunted (EoT)") when end field is empty
+
 ## [2.1.8] - 2026-03-14
 
 ### Fixed

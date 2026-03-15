@@ -1768,6 +1768,44 @@ async function handleGMApplyStatus({
           return { success: false, error: "Could not resolve effect document" };
         }
 
+        // Extract duration from PowerRollEffect if not already provided
+        // The duration is stored in the AppliedPowerRollEffect's _source.applied[tier].effects[statusId].end
+        if (!duration?.end?.type && resolvedDoc._source?.applied) {
+          const tiers = ['tier1', 'tier2', 'tier3'];
+          for (const tier of tiers) {
+            const tierData = resolvedDoc._source.applied[tier];
+            const tierEffects = tierData?.effects;
+            const effectData = tierEffects?.[statusId];
+            
+            // Check end field first, then fall back to parsing display string
+            let endType = effectData?.end;
+            
+            // If end is empty, check display string for EoT, Save Ends, etc.
+            if (!endType && effectData?.display) {
+              const display = effectData.display.toLowerCase();
+              if (display.includes('eot') || display.includes('end of turn')) {
+                endType = 'turn';
+              } else if (display.includes('save ends')) {
+                endType = 'save';
+              } else if (display.includes('encounter')) {
+                endType = 'encounter';
+              }
+            }
+            
+            if (endType) {
+              duration = {
+                type: 'draw-steel',
+                label: endType === 'save' ? 'Save Ends' : 
+                       endType === 'turn' ? 'EoT' :
+                       endType === 'encounter' ? 'EoE' : 'Special',
+                end: { type: endType }
+              };
+              detailedLog('[handleGMApplyStatus] Extracted duration from PowerRollEffect', { statusId, tier, duration, endType, display: effectData?.display });
+              break;
+            }
+          }
+        }
+
         // Check if effect is a status effect or custom ActiveEffect
         // Draw Steel uses _getEffect to retrieve the effect from the AppliedPowerRollEffect
         const getEffectMethod = resolvedDoc._getEffect?.bind(resolvedDoc);
@@ -1867,6 +1905,11 @@ async function handleGMApplyStatus({
               origin: originUuid
             });
 
+            // Apply duration if provided (e.g., EoT, Save Ends, Encounter)
+            if (duration?.end?.type) {
+              tempEffect.updateSource({ "system.end.type": duration.end.type });
+            }
+
             // For targeted statuses, add source actor to changes
             if (isTargetedStatus && sourceActorUuid) {
               let effectData = tempEffect.toObject();
@@ -1911,6 +1954,12 @@ async function handleGMApplyStatus({
         // This preserves all effect properties including duration, flags, etc.
         const tempEffect = effectDoc.clone({}, { keepId: false });
         const effectData = tempEffect.toObject();
+
+        // Apply duration if provided (e.g., EoT, Save Ends, Encounter)
+        if (duration?.end?.type) {
+          effectData.system = effectData.system || {};
+          effectData.system.end = { type: duration.end.type };
+        }
         
         // Apply the effect to the actor using standard Foundry method
         await actor.createEmbeddedDocuments("ActiveEffect", [effectData]);
