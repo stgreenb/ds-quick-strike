@@ -1892,6 +1892,23 @@ async function handleGMApplyStatus({
             await actor.createEmbeddedDocuments("ActiveEffect", [clonedEffect.toObject()]);
           }
 
+          Hooks.callAll("ds-quick-strike:statusApplied", {
+            actorId: actor.id,
+            tokenId: actualToken?.id ?? null,
+            statusName: statusId,
+            statusId: statusId,
+            statusUuid: effectUuid,
+            effectId: effect.id,
+            sourceActorId: sourceActorId,
+            sourceItemId: sourceItemId,
+            sourceItemName: sourceItemName,
+            sourcePlayerName: sourcePlayerName,
+            ability: ability,
+            eventId: eventId || `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: timestamp || Date.now(),
+            duration: duration
+          });
+
           return { success: true, statusName: statusId };
         }
 
@@ -1924,6 +1941,24 @@ async function handleGMApplyStatus({
             } else {
               await actor.createEmbeddedDocuments("ActiveEffect", [tempEffect.toObject()]);
             }
+
+            Hooks.callAll("ds-quick-strike:statusApplied", {
+              actorId: actor.id,
+              tokenId: actualToken?.id ?? null,
+              statusName: statusId,
+              statusId: statusId,
+              statusUuid: effectUuid,
+              effectId: null,
+              sourceActorId: sourceActorId,
+              sourceItemId: sourceItemId,
+              sourceItemName: sourceItemName,
+              sourcePlayerName: sourcePlayerName,
+              ability: ability,
+              eventId: eventId || `status-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              timestamp: timestamp || Date.now(),
+              duration: duration
+            });
+
             return { success: true, statusName: statusId };
           }
         }
