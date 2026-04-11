@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-04-11
+
+### Changed
+- **Foundry VTT Compatibility**: Updated minimum compatibility from v13 to v14
+- **Draw Steel Compatibility**: Updated minimum compatibility from 0.10.x to 1.0
+- **ActiveEffect Duration Field**: Updated to use `duration.expiry` instead of deprecated `system.end.type` for ActiveEffect duration
+- **CONFIG.statusEffects Access**: Updated to use record format (`CONFIG.statusEffects[statusId]`) with array fallback for compatibility
+
+### Fixed
+- **Status Duration Display**: Fixed duration label not displaying on token overview - now properly uses localized label from DS config
+- **Status Source Display**: Fixed source not showing on token overview - origin is now set for all status applications
+
 ## [2.2.0] - 2026-03-16
 
 ### Fixed

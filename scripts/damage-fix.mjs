@@ -1917,30 +1917,37 @@ async function handleGMApplyStatus({
           const DrawSteelActiveEffect = globalThis.ds?.documents?.DrawSteelActiveEffect;
           if (DrawSteelActiveEffect) {
             const tempEffect = await DrawSteelActiveEffect.fromStatusEffect(statusId);
-            tempEffect.updateSource({
-              transfer: true,
-              origin: originUuid
-            });
 
             // Apply duration if provided (e.g., EoT, Save Ends, Encounter)
+            // Get the object representation and set duration before createEmbeddedDocuments
+            // DS 1.0 uses expiryEvent values: turnEnd, save, combatEnd, respite
+            let effectData = tempEffect.toObject();
             if (duration?.end?.type) {
-              tempEffect.updateSource({ "system.end.type": duration.end.type });
+              const dsConfig = globalThis.ds?.CONFIG;
+              const expiryEvent = dsConfig?.effectEnds?.[duration.end.type]?.expiryEvent || duration.end.type;
+              const endConfig = dsConfig?.effectEnds?.[duration.end.type];
+              effectData.duration = effectData.duration || {};
+              effectData.duration.expiry = expiryEvent;
+              if (endConfig?.label) {
+                effectData.duration.label = endConfig.label;
+              } else if (duration.label) {
+                effectData.duration.label = duration.label;
+              }
             }
-
             // For targeted statuses, add source actor to changes
             if (isTargetedStatus && sourceActorUuid) {
-              let effectData = tempEffect.toObject();
               effectData.changes = effectData.changes || [];
               effectData.changes.push({
                 key: `system.statuses.${statusId}.sources`,
                 mode: CONST.ACTIVE_EFFECT_MODES.ADD,
                 value: sourceActorUuid
               });
-
-              await actor.createEmbeddedDocuments("ActiveEffect", [effectData]);
-            } else {
-              await actor.createEmbeddedDocuments("ActiveEffect", [tempEffect.toObject()]);
             }
+            // Always set origin from the PowerRollEffect source (not just targeted statuses)
+            if (effectUuid && sourceActorUuid) {
+              effectData.origin = sourceActorUuid;
+            }
+            await actor.createEmbeddedDocuments("ActiveEffect", [effectData]);
 
             Hooks.callAll("ds-quick-strike:statusApplied", {
               actorId: actor.id,
@@ -1991,9 +1998,11 @@ async function handleGMApplyStatus({
         const effectData = tempEffect.toObject();
 
         // Apply duration if provided (e.g., EoT, Save Ends, Encounter)
+        // DS 1.0 uses expiryEvent values: turnEnd, save, combatEnd, respite
         if (duration?.end?.type) {
-          effectData.system = effectData.system || {};
-          effectData.system.end = { type: duration.end.type };
+          const dsConfig = globalThis.ds?.CONFIG;
+          const expiryEvent = dsConfig?.effectEnds?.[duration.end.type]?.expiryEvent || duration.end.type;
+          effectData.duration = { expiry: expiryEvent };
         }
         
         // Apply the effect to the actor using standard Foundry method
@@ -2118,7 +2127,7 @@ async function handleGMApplyStatus({
     return { success: false, error: "Status identifier is undefined" };
   }
 
-  const existingStatus = CONFIG.statusEffects.find(e => e.id === statusId);
+  const existingStatus = CONFIG.statusEffects[statusId] || CONFIG.statusEffects.find(e => e.id === statusId);
   detailedLog('[handleGMApplyStatus] branch: standard status', { statusId, existingStatus: !!existingStatus });
 
   if (!existingStatus) {
@@ -2130,7 +2139,8 @@ async function handleGMApplyStatus({
   detailedLog('[handleGMApplyStatus] hasStatus', { hasStatus });
 
   if (!hasStatus) {
-    const effectEnd = duration?.end?.type || "";
+    const dsConfig = globalThis.ds?.CONFIG;
+    const effectEnd = duration?.end?.type ? dsConfig?.effectEnds?.[duration.end.type]?.expiryEvent || duration.end.type : "";
     detailedLog('[handleGMApplyStatus] toggling status effect', { statusId, effectEnd });
     await actor.toggleStatusEffect(statusId, { active: true, overlay: false, effectEnd: effectEnd });
   }
